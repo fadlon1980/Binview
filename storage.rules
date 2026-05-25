@@ -13,11 +13,11 @@ service firebase.storage {
     }
 
     match /families/fadlon-family/{allPaths=**} {
-      allow read, write, delete: if isFamilyEmail();
+      allow read, write: if isFamilyEmail();
     }
 
     match /{allPaths=**} {
-      allow read, write, delete: if false;
+      allow read, write: if false;
     }
   }
 }

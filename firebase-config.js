@@ -1,22 +1,21 @@
 // BinView Firebase Cloud Configuration
-// 1) Create a Firebase project.
-// 2) Add a Web App in Firebase Project Settings.
-// 3) Copy your Firebase config values below.
-// 4) Replace the family member emails with real Google emails.
+// This file is used directly by the GitHub Pages static app.
+// Do not add Firebase npm imports here. app.js imports the Firebase browser SDK from Google's CDN.
 
 export const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY_HERE",
-  authDomain: "PASTE_YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "PASTE_YOUR_PROJECT_ID",
-  storageBucket: "PASTE_YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "PASTE_YOUR_MESSAGING_SENDER_ID",
-  appId: "PASTE_YOUR_APP_ID"
+  apiKey: "AIzaSyDQCK3SF2VV6-yjNxYO9-tmjt_YlxroTXY",
+  authDomain: "binvie.firebaseapp.com",
+  projectId: "binvie",
+  storageBucket: "binvie.firebasestorage.app",
+  messagingSenderId: "312648958039",
+  appId: "1:312648958039:web:eec239d186c5e7a289a312"
 };
 
 export const FAMILY_ID = "fadlon-family";
 
-// IMPORTANT: these emails must match the emails in firestore.rules and storage.rules.
-// Use the Google email each family member will use to sign in.
+// IMPORTANT:
+// Replace these placeholder emails with the real Google emails each person will use to sign in.
+// The same emails must also be copied into firestore.rules and storage.rules.
 export const FAMILY_MEMBERS = [
   { name: "Elad", email: "REPLACE_ELAD_EMAIL@gmail.com", role: "Owner" },
   { name: "Maayan", email: "REPLACE_MAAYAN_EMAIL@gmail.com", role: "Admin" },
