@@ -1,173 +1,60 @@
-# BinView Private Family MVP
+# BinView Private Family Static MVP
 
-BinView is a small private-family prototype for creating QR labels for closed garage storage bins.
+This is a no-build GitHub Pages version of BinView. It does not use React, Vite, Tailwind, Node, or npm.
 
-You can:
+That makes it much easier to publish and avoids blank-page problems caused by build configuration.
 
-- Sign in with an approved family name and shared family PIN
-- Create a storage bin
-- Add bin location, category, and notes
-- Take/upload photos of the bin contents
-- Generate a QR label for the bin
-- Print the QR label
-- Scan the QR later to open the bin page
-- Manage simple family roles: Owner, Admin, Viewer
+## Family names
 
-> Important: This MVP uses browser local storage only. It is good for experimenting with the flow and UI. It is not yet a true cloud/private family app across devices. The next version should use Firebase Authentication, Firestore, Firebase Storage, and security rules.
+Approved names in this prototype:
 
----
+- Elad — Owner
+- Maayan — Admin
+- Michal — Viewer
+- Maya — Viewer
+- Daniel — Viewer
 
-## Approved family members
+## How to upload to GitHub
 
-The app is configured for these family members:
+Upload these files directly to the top level of your repository:
 
-```text
-Elad
-Maayan
-Michal
-Maya
-Daniel
-```
+- `index.html`
+- `app.js`
+- `styles.css`
+- `manifest.webmanifest`
+- `.nojekyll`
+- `.github/workflows/deploy.yml`
+- `README.md`
 
-Default roles:
+The top level of the repository should show `index.html` directly. Do not upload the whole folder as a folder.
 
-| Family Member | Role |
-|---|---|
-| Elad | Owner |
-| Maayan | Admin |
-| Michal | Viewer |
-| Maya | Viewer |
-| Daniel | Viewer |
+## GitHub Pages setup
 
-Default family PIN:
+Option A, recommended if you already selected GitHub Actions:
 
-```text
-1234
-```
+1. Go to Settings → Pages.
+2. Under Build and deployment, set Source to GitHub Actions.
+3. Go to Actions.
+4. Open "Deploy static BinView to GitHub Pages".
+5. Confirm it turns green.
+6. Go back to Settings → Pages and open the live link.
 
-You can change the PIN after signing in as **Elad / Owner** by opening **Family → Family PIN**.
+Option B, also works:
 
-Role behavior:
+1. Go to Settings → Pages.
+2. Under Build and deployment, set Source to Deploy from a branch.
+3. Select Branch: main.
+4. Select Folder: / root.
+5. Save.
 
-| Role | View Bins | Add/Edit Bins | Add Photos | Manage Family / PIN |
-|---|---:|---:|---:|---:|
-| Owner | Yes | Yes | Yes | Yes |
-| Admin | Yes | Yes | Yes | No |
-| Viewer | Yes | No | No | No |
+## Important privacy note
 
----
+This is still a prototype. The family-name gate is not real security because GitHub Pages is public.
 
-## Privacy note
+For real private family access, use the next Firebase version with Google login, Firestore security rules, and Firebase Storage.
 
-This is a lightweight prototype for simple garage-bin storage.
+## Storage limitation
 
-Because it is a static GitHub Pages app using browser local storage:
+This version stores bins and photos in the browser localStorage. Data is local to each device/browser.
 
-- The name + PIN gate is only a simple access screen, not strong security.
-- Photos are stored only in the browser/device where they were uploaded.
-- A QR created on one phone will not show the same photos on another phone yet.
-- Do not store sensitive personal documents, passwords, medical information, financial records, or anything private in this prototype.
-
-For real private access across all family phones, use the Firebase version.
-
----
-
-## Run locally
-
-You need Node.js installed.
-
-```bash
-npm install
-npm run dev
-```
-
-Then open the local link Vite shows, usually:
-
-```text
-http://localhost:5173
-```
-
----
-
-## Upload to GitHub
-
-1. Create a new GitHub repository, for example: `binview-private-family-mvp`.
-2. Upload all files from this folder into the repository.
-3. Commit to the `main` branch.
-
----
-
-## Enable GitHub Pages
-
-This package includes a GitHub Actions workflow at:
-
-```text
-.github/workflows/deploy.yml
-```
-
-After uploading the files:
-
-1. Go to your repository on GitHub.
-2. Open **Settings**.
-3. Open **Pages**.
-4. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-5. Go to the **Actions** tab.
-6. Wait for the deploy workflow to complete.
-7. Go back to **Settings → Pages** and copy the live site link.
-
-Your app should become available at a link similar to:
-
-```text
-https://YOUR-GITHUB-USERNAME.github.io/binview-private-family-mvp/
-```
-
----
-
-## Phone testing
-
-Once GitHub Pages is live:
-
-1. Open the live link from your phone.
-2. Select **Elad**.
-3. Enter PIN `1234`.
-4. Create a bin.
-5. Use **Camera** to take photos.
-6. Open **QR label**.
-7. Print the label or copy the link.
-8. Scan the QR from the same browser/device to test the flow.
-
-Because this is local-storage only, test the QR on the same phone/browser where you created the bin.
-
----
-
-## Recommended next version
-
-V1.2 should replace local storage with:
-
-- Firebase Authentication for real Google login
-- Firestore for bin records
-- Firebase Storage for photos
-- Firestore security rules for family-only access
-- Real family invite/approval list
-
-Suggested Firebase collections:
-
-```text
-families/{familyId}
-families/{familyId}/members/{userId}
-families/{familyId}/bins/{binId}
-families/{familyId}/bins/{binId}/photos/{photoId}
-```
-
----
-
-## Notes
-
-This project uses:
-
-- Vite
-- React
-- Tailwind CSS
-- qrcode.react
-- lucide-react
-- framer-motion
+If Elad creates a bin on one phone, Maayan will not see it from another phone until the app is connected to a cloud database.

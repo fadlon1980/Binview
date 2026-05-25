@@ -3,13 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#020617" />
+    <meta name="theme-color" content="#0f172a" />
     <meta name="description" content="Private family QR storage bin photo inventory app" />
     <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
     <title>BinView</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <div id="app">
+      <div class="boot-card">
+        <h1>BinView</h1>
+        <p>Loading app...</p>
+        <noscript>This app needs JavaScript enabled.</noscript>
+      </div>
+    </div>
+    <script src="./app.js" defer></script>
   </body>
 </html>
