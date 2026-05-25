@@ -26,6 +26,10 @@ import {
   getDownloadURL,
   deleteObject
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
+import {
+  getFunctions,
+  httpsCallable
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
 import { firebaseConfig, FAMILY_ID, FAMILY_MEMBERS } from "./firebase-config.js";
 
 const appRoot = document.getElementById("app");
@@ -36,6 +40,7 @@ let firebaseApp;
 let auth;
 let db;
 let storage;
+let functions;
 let currentUser = null;
 let currentMember = null;
 let bins = [];
@@ -110,6 +115,12 @@ const IMAGE_COMPRESSION = {
   mimeType: "image/jpeg"
 };
 
+const AI_IMAGE_PREP = {
+  maxDimension: 1024,
+  jpegQuality: 0.62,
+  mimeType: "image/jpeg"
+};
+
 function formatFileSize(bytes) {
   if (!bytes && bytes !== 0) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -140,6 +151,59 @@ function canvasToBlob(canvas, type, quality) {
       else reject(new Error("Could not compress image."));
     }, type, quality);
   });
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.onerror = () => reject(new Error("Could not read image for AI analysis."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function makeAiImagePayload(sourceBlob) {
+  const image = await loadImageFromFile(sourceBlob);
+  const maxSide = Math.max(image.naturalWidth, image.naturalHeight);
+  const scale = Math.min(1, AI_IMAGE_PREP.maxDimension / maxSide);
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { alpha: false });
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+
+  const aiBlob = await canvasToBlob(canvas, AI_IMAGE_PREP.mimeType, AI_IMAGE_PREP.jpegQuality);
+  return {
+    imageBase64: await blobToBase64(aiBlob),
+    mimeType: AI_IMAGE_PREP.mimeType,
+    width,
+    height,
+    sizeBytes: aiBlob.size
+  };
+}
+
+async function generateAiDescription({ imageBlob, bin, caption }) {
+  if (!functions) throw new Error("Firebase Functions is not initialized.");
+  const payload = await makeAiImagePayload(imageBlob);
+  const describePhoto = httpsCallable(functions, "describeBinPhoto");
+  const result = await describePhoto({
+    imageBase64: payload.imageBase64,
+    mimeType: payload.mimeType,
+    binName: bin?.name || "",
+    binLocation: bin?.location || "",
+    binCategory: bin?.category || "",
+    binNotes: bin?.notes || "",
+    caption: caption || ""
+  });
+  return String(result?.data?.description || "").trim();
 }
 
 async function compressImageFile(file) {
@@ -248,6 +312,7 @@ async function init() {
     auth = getAuth(firebaseApp);
     db = getFirestore(firebaseApp);
     storage = getStorage(firebaseApp);
+    functions = getFunctions(firebaseApp, "us-central1");
 
     window.addEventListener("hashchange", readRoute);
     onAuthStateChanged(auth, user => {
@@ -384,11 +449,24 @@ async function addPhotos(bin, files) {
 
     for (const file of selectedFiles) {
       const photoId = crypto.randomUUID();
+      const originalBaseName = (file.name || `photo-${photoId}`).replace(/\.[^.]+$/, "");
+      setBusy(`Compressing ${originalBaseName || "photo"}...`);
       const compressed = await compressImageFile(file);
       totalOriginalBytes += compressed.originalSize || 0;
       totalSavedBytes += compressed.compressedSize || 0;
 
-      const originalBaseName = (file.name || `photo-${photoId}`).replace(/\.[^.]+$/, "");
+      let aiDescription = "";
+      let aiStatus = "not-run";
+      try {
+        setBusy(`AI is describing ${originalBaseName || "photo"}...`);
+        aiDescription = await generateAiDescription({ imageBlob: compressed.blob, bin, caption: originalBaseName });
+        aiStatus = aiDescription ? "generated" : "empty";
+      } catch (aiError) {
+        console.warn("AI description failed. The photo will still be uploaded.", aiError);
+        aiStatus = "failed";
+      }
+
+      setBusy(`Uploading ${originalBaseName || "photo"}...`);
       const safeName = makeSafeFileName(`${originalBaseName}.jpg`);
       const path = `families/${FAMILY_ID}/bins/${bin.id}/${photoId}-${safeName}`;
       const storageRef = ref(storage, path);
@@ -416,6 +494,10 @@ async function addPhotos(bin, files) {
         width: compressed.width,
         height: compressed.height,
         wasCompressed: compressed.wasCompressed,
+        aiDescription,
+        aiStatus,
+        aiModel: aiDescription ? "gemini" : "",
+        aiGeneratedAt: aiDescription ? new Date().toISOString() : "",
         createdAt: new Date().toISOString()
       });
     }
@@ -599,7 +681,8 @@ function renderBinsPage() {
   const filtered = bins.filter(bin => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
-    return [bin.name, bin.location, bin.category, bin.notes].join(" ").toLowerCase().includes(q);
+    const photoText = (bin.photos || []).map(p => [p.caption, p.aiDescription].join(" ")).join(" ");
+    return [bin.name, bin.location, bin.category, bin.notes, photoText].join(" ").toLowerCase().includes(q);
   });
 
   return `
@@ -692,6 +775,7 @@ function renderPhotoCard(bin, photo) {
       <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.caption || "Bin photo")}" loading="lazy" />
       <div class="photo-card-body">
         ${canEdit() ? `<input class="caption-input" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}" value="${escapeHtml(photo.caption || "")}" placeholder="Photo caption" />` : `<h3>${escapeHtml(photo.caption || "Photo")}</h3>`}
+        ${photo.aiDescription ? `<div class="ai-description"><b>AI saw:</b> ${escapeHtml(photo.aiDescription)}</div>` : photo.aiStatus === "failed" ? `<div class="ai-description muted"><b>AI:</b> description was not generated. Photo saved normally.</div>` : ""}
         <div class="photo-card-footer">
           <span class="tiny">${escapeHtml(photo.uploadedBy || "Family")} · ${escapeHtml(fmtDate(photo.createdAt))}${photo.compressedSizeBytes ? ` · ${escapeHtml(formatFileSize(photo.compressedSizeBytes))}` : ""}</span>
           ${canEdit() ? `<button class="btn btn-danger" data-action="delete-photo" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}">${icons.trash}</button>` : ""}

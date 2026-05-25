@@ -1,128 +1,21 @@
-# BinView Family Cloud
+# BinView Family Cloud — AI Photo Descriptions
 
-BinView Family Cloud is a private family app for garage/storage bins. This package is configured for Elad and Maayan only.
+This version adds **Level 2 AI description per photo** to the existing BinView Firebase cloud app.
 
-It lets you:
+When a family member uploads a photo, the app now:
 
-- Sign in with Google
-- Allow only approved family emails
-- Create storage bins
-- Add notes, location, and category
-- Upload/take photos
-- Generate a QR label for each bin
-- Scan a bin QR code from any approved family phone
+1. Compresses the photo in the browser.
+2. Sends a smaller analysis copy to a Firebase Cloud Function.
+3. The function asks Gemini to write a short inventory description.
+4. The photo and AI description are saved on the bin record.
+5. Search can find matches from bin details, captions, and AI descriptions.
 
-This version is still a simple static web app hosted on GitHub Pages, but the data is stored in Firebase Cloud Firestore and Firebase Storage.
+Approved users in this package:
 
----
+- Elad — `fadlon1980@gmail.com` — Owner
+- Maayan — `fadlonmay@gmail.com` — Admin
 
-## Files you must edit
-
-Before the app can work, edit these files:
-
-```text
-firebase-config.js
-firestore.rules
-storage.rules
-```
-
-This package is already configured with these approved Google accounts:
-
-```text
-Elad   — fadlon1980@gmail.com — Owner
-Maayan — fadlonmay@gmail.com   — Admin
-```
-
-Michal, Maya, and Daniel are not included in this version. You can add them later by adding their Google emails to `firebase-config.js`, `firestore.rules`, and `storage.rules`.
-
----
-
-## Step 1: Create Firebase project
-
-1. Go to Firebase Console.
-2. Create a new project, for example `binview-family`.
-3. Add a Web App.
-4. Copy the Firebase config object.
-5. Paste it into `firebase-config.js`.
-
-Example:
-
-```js
-export const firebaseConfig = {
-  apiKey: "...",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "your-project",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "...",
-  appId: "..."
-};
-```
-
----
-
-## Step 2: Enable Google login
-
-In Firebase Console:
-
-```text
-Build → Authentication → Sign-in method → Google → Enable
-```
-
-Then add your GitHub Pages domain under authorized domains.
-
-Example domain:
-
-```text
-your-github-username.github.io
-```
-
-Do not include `https://` and do not include the repository path.
-
----
-
-## Step 3: Create Firestore database
-
-In Firebase Console:
-
-```text
-Build → Firestore Database → Create database
-```
-
-Choose production mode.
-
-Then go to the Firestore Rules tab and paste the content of:
-
-```text
-firestore.rules
-```
-
-Publish the rules.
-
----
-
-## Step 4: Create Firebase Storage
-
-In Firebase Console:
-
-```text
-Build → Storage → Get started
-```
-
-Then go to the Storage Rules tab and paste the content of:
-
-```text
-storage.rules
-```
-
-Publish the rules.
-
----
-
-## Step 5: Upload to GitHub
-
-Upload the files to the top level of your GitHub repository.
-
-The repository should look like this:
+## Files
 
 ```text
 index.html
@@ -131,91 +24,174 @@ styles.css
 firebase-config.js
 firestore.rules
 storage.rules
+firebase.json
+functions/
+  package.json
+  index.js
+.github/workflows/deploy.yml
+.nojekyll
 manifest.webmanifest
-README.md
+```
+
+## Important architecture note
+
+The Gemini API key is **not** placed inside the public GitHub Pages app.
+
+The public app calls a private Firebase Cloud Function named:
+
+```text
+describeBinPhoto
+```
+
+The Cloud Function stores the Gemini key as a Firebase secret and only allows the approved family emails to use it.
+
+## Step 1 — Upload website files to GitHub
+
+Upload the package contents to your existing GitHub Pages repository.
+
+Your repository top level should look like this:
+
+```text
+index.html
+app.js
+styles.css
+firebase-config.js
+firestore.rules
+storage.rules
+firebase.json
+functions/
 .github/
 .nojekyll
+README.md
 ```
 
-Not like this:
+Commit directly to `main`.
+
+GitHub Pages should deploy the static website the same way as your previous working version.
+
+## Step 2 — Install Firebase CLI locally
+
+On your computer, install Firebase CLI:
+
+```bash
+npm install -g firebase-tools
+```
+
+Login:
+
+```bash
+firebase login
+```
+
+Go into the project folder:
+
+```bash
+cd binview-family-cloud-firebase-ai-descriptions
+```
+
+Connect to your Firebase project:
+
+```bash
+firebase use binvie
+```
+
+If that does not work, run:
+
+```bash
+firebase projects:list
+firebase use --add
+```
+
+Then select the `binvie` project.
+
+## Step 3 — Set the Gemini API key as a Firebase secret
+
+Create a Gemini API key in Google AI Studio, then run:
+
+```bash
+firebase functions:secrets:set GEMINI_API_KEY
+```
+
+Paste your Gemini API key when the terminal asks for it.
+
+Do not commit the Gemini API key to GitHub.
+
+## Step 4 — Deploy the Cloud Function
+
+From the same project folder, run:
+
+```bash
+firebase deploy --only functions
+```
+
+After deployment, Firebase should show the callable function:
 
 ```text
-binview-family-cloud-firebase-elad-maayan/
-  index.html
-  app.js
+describeBinPhoto
 ```
 
----
-
-## Step 6: Publish with GitHub Pages
-
-You can publish this app in either of these ways.
-
-### Simple option
+Region:
 
 ```text
-Settings → Pages → Build and deployment → Source → Deploy from a branch
-Branch: main
-Folder: / root
-Save
+us-central1
 ```
 
-### GitHub Actions option
+## Step 5 — Confirm Firebase rules
+
+Firestore rules should still allow only Elad and Maayan:
 
 ```text
-Settings → Pages → Build and deployment → Source → GitHub Actions
+fadlon1980@gmail.com
+fadlonmay@gmail.com
 ```
 
-Then check the Actions tab and wait for the deploy workflow to turn green.
+Storage rules should also allow only these two emails.
 
----
-
-## How security works
-
-This version uses Firebase Authentication and Firebase Security Rules.
-
-The app checks the signed-in Google email in the browser for a better user experience.
-
-The real protection is in:
+If needed, paste and publish the included files:
 
 ```text
 firestore.rules
 storage.rules
 ```
 
-Only the family emails listed in those rules can read or write bins/photos.
+## Step 6 — Test
 
----
-
-## Important privacy note
-
-The GitHub Pages website files are public, but your bin data and photos are protected by Firebase rules.
-
-Do not put private data directly into the code files. The photos and bin contents should be stored only in Firebase.
-
-
-## QR auto-generation fix
-
-This version shows an auto-generated QR card directly on each bin page and removes the dependency on the external JavaScript QR library. The printable label still opens from the QR Label button.
-
-
-## Photo compression update
-
-This version compresses photos in the browser before uploading them to Firebase Storage.
-
-Default compression settings:
+1. Open your GitHub Pages app.
+2. Sign in as Elad or Maayan.
+3. Open a bin.
+4. Upload a new photo.
+5. The upload status should show:
 
 ```text
-Max width/height: 1600 px
-Format: JPEG
-Quality: 0.74
+Compressing...
+AI is describing...
+Uploading...
 ```
 
-Why this helps:
+6. After upload, the photo card should show:
 
-- Faster upload from phone
-- Faster QR scan page loading
-- Lower Firebase Storage usage
-- Lower bandwidth usage
+```text
+AI saw: ...
+```
 
-The original photo file is not uploaded. The compressed version is uploaded and the app stores the compressed file size on the photo record.
+7. Try searching for an item shown in the AI description.
+
+## If AI does not work
+
+The photo should still upload normally. You may see:
+
+```text
+AI: description was not generated. Photo saved normally.
+```
+
+Common causes:
+
+- Cloud Function was not deployed.
+- `GEMINI_API_KEY` secret was not set.
+- Signed-in email is not one of the approved emails.
+- Gemini API is not enabled for the key/project.
+- Firebase Functions requires billing/Blaze plan.
+
+## Cost note
+
+This version adds Gemini API usage and Cloud Functions usage. For a small family garage-bin app, usage should usually be low, but set a budget alert in Google Cloud/Firebase.

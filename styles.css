@@ -131,3 +131,18 @@ h3 { font-size: 18px; }
   .modal-head, .modal .actions { display: none !important; }
   .qr-box { border: 0; }
 }
+
+.ai-description {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #eef6ff;
+  color: #184262;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ai-description.muted {
+  background: #f8fafc;
+  color: #64748b;
+}
