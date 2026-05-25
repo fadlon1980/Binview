@@ -1,8 +1,9 @@
 {
-  "name": "BinView",
+  "name": "BinView Family Cloud",
   "short_name": "BinView",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f8fafc",
-  "theme_color": "#0f172a"
+  "theme_color": "#0f172a",
+  "icons": []
 }

@@ -4,19 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f172a" />
-    <meta name="description" content="Private family QR storage bin photo inventory app" />
+    <title>BinView Family Cloud</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./styles.css" />
-    <title>BinView</title>
   </head>
   <body>
-    <div id="app">
-      <div class="boot-card">
-        <h1>BinView</h1>
-        <p>Loading app...</p>
-        <noscript>This app needs JavaScript enabled.</noscript>
-      </div>
-    </div>
-    <script src="./app.js" defer></script>
+    <noscript>BinView requires JavaScript.</noscript>
+    <div id="app"></div>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

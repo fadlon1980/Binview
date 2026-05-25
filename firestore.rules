@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isFamilyEmail() {
+      return request.auth != null
+        && request.auth.token.email in [
+          "REPLACE_ELAD_EMAIL@gmail.com",
+          "REPLACE_MAAYAN_EMAIL@gmail.com",
+          "REPLACE_MICHAL_EMAIL@gmail.com",
+          "REPLACE_MAYA_EMAIL@gmail.com",
+          "REPLACE_DANIEL_EMAIL@gmail.com"
+        ];
+    }
+
+    match /families/fadlon-family/{document=**} {
+      allow read, write: if isFamilyEmail();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

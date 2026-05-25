@@ -1,430 +1,708 @@
-(function () {
-  const STORAGE_KEY = "binview_private_family_static_v1";
-  const app = document.getElementById("app");
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  doc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp,
+  arrayUnion
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import {
+  getStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
+import { firebaseConfig, FAMILY_ID, FAMILY_MEMBERS } from "./firebase-config.js";
 
-  const initialMembers = [
-    { name: "Elad", role: "Owner" },
-    { name: "Maayan", role: "Admin" },
-    { name: "Michal", role: "Viewer" },
-    { name: "Maya", role: "Viewer" },
-    { name: "Daniel", role: "Viewer" },
-  ];
+const appRoot = document.getElementById("app");
+const provider = new GoogleAuthProvider();
+provider.setCustomParameters({ prompt: "select_account" });
 
-  const demoBins = [
-    {
-      id: "garage-bin-01",
-      name: "Garage Bin 01",
-      location: "Garage Shelf A",
-      category: "Demo bin",
-      notes: "Use this demo bin to test photos and QR labels.",
-      createdAt: new Date().toISOString(),
-      photos: [],
-    },
-  ];
+let firebaseApp;
+let auth;
+let db;
+let storage;
+let currentUser = null;
+let currentMember = null;
+let bins = [];
+let binsUnsubscribe = null;
+let selectedBinId = null;
+let activeView = "bins";
+let searchQuery = "";
+let busyMessage = "";
+let errorMessage = "";
+let qrModalBin = null;
+let editModalBin = null;
+let createModalOpen = false;
 
-  let state = loadState();
+const icons = {
+  package: "📦",
+  camera: "📷",
+  qr: "▦",
+  family: "👨‍👩‍👧‍👦",
+  lock: "🔒",
+  home: "⌂",
+  search: "⌕",
+  upload: "⬆",
+  trash: "🗑",
+  edit: "✎",
+  pin: "📍"
+};
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (err) {
-      console.error("Could not load state", err);
-    }
-    return { currentUser: null, familyMembers: initialMembers, bins: demoBins };
+function isConfigured() {
+  return firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("PASTE_") &&
+    firebaseConfig.projectId && !firebaseConfig.projectId.includes("PASTE_");
+}
+
+function normalizeEmail(email = "") {
+  return email.trim().toLowerCase();
+}
+
+function getMemberForEmail(email) {
+  const normalized = normalizeEmail(email);
+  return FAMILY_MEMBERS.find(m => normalizeEmail(m.email) === normalized) || null;
+}
+
+function canEdit() {
+  return currentMember?.role === "Owner" || currentMember?.role === "Admin";
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function fmtDate(ts) {
+  try {
+    if (!ts) return "";
+    const date = ts.toDate ? ts.toDate() : new Date(ts);
+    return date.toLocaleDateString();
+  } catch {
+    return "";
   }
+}
 
-  function saveState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }
+function makeSafeFileName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-+|-+$/g, "") || `photo-${Date.now()}`;
+}
 
-  function setState(updater) {
-    state = typeof updater === "function" ? updater(state) : updater;
-    saveState();
-    render();
-  }
+function getBinUrl(binId) {
+  return `${window.location.origin}${window.location.pathname}#/bin/${binId}`;
+}
 
-  function escapeHtml(value) {
-    return String(value || "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-
-  function makeSlug(value) {
-    const slug = String(value || "")
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-    return slug || "bin-" + Date.now();
-  }
-
-  function getRoute() {
-    const hash = window.location.hash || "#home";
-    const match = hash.match(/^#bin\/(.+)$/);
-    if (match) return { page: "bin", id: decodeURIComponent(match[1]) };
-    if (hash === "#family") return { page: "family" };
-    return { page: "home" };
-  }
-
-  function canEdit() {
-    return state.currentUser && ["Owner", "Admin"].includes(state.currentUser.role);
-  }
-
-  function currentBaseUrl() {
-    return window.location.href.split("#")[0];
-  }
-
-  function binUrl(binId) {
-    return currentBaseUrl() + "#bin/" + encodeURIComponent(binId);
-  }
-
-  function qrImageUrl(value) {
-    return "https://quickchart.io/qr?size=260&margin=2&text=" + encodeURIComponent(value);
-  }
-
-  function render() {
-    try {
-      if (!state.currentUser) {
-        renderLogin();
-        return;
-      }
-      const route = getRoute();
-      if (route.page === "family") renderShell(renderFamily());
-      else if (route.page === "bin") renderShell(renderBin(route.id));
-      else renderShell(renderHome());
-    } catch (err) {
-      console.error(err);
-      app.innerHTML = `
-        <div class="boot-card">
-          <h2>Something went wrong</h2>
-          <p>The app loaded but hit an error. Try clearing site data, or use the reset button below.</p>
-          <pre style="white-space:pre-wrap;background:#f1f5f9;border-radius:16px;padding:12px;margin-top:12px;color:#334155;">${escapeHtml(err.message || err)}</pre>
-          <button class="btn danger" onclick="localStorage.removeItem('${STORAGE_KEY}'); location.reload();">Reset local app data</button>
-        </div>`;
-    }
-  }
-
-  function renderLogin(error = "") {
-    const memberOptions = state.familyMembers.map((m) => `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}</option>`).join("");
-    app.innerHTML = `
-      <div class="login-page">
-        <div class="login-grid">
-          <section class="card hero-card">
-            <span class="badge">🔒 Private family storage app</span>
-            <h1>BinView</h1>
-            <p>Create QR labels for closed garage storage bins. Scan the QR later to see photos and notes for what is inside.</p>
-            <div class="feature-row">
-              <div class="feature"><strong>📦 Create bins</strong><p>Name, shelf, category, notes.</p></div>
-              <div class="feature"><strong>📷 Add photos</strong><p>Use camera or upload pictures.</p></div>
-              <div class="feature"><strong>🔳 Print QR</strong><p>Stick a QR label on each bin.</p></div>
-            </div>
-          </section>
-          <section class="card">
-            <h2>Family sign in</h2>
-            <p>Select one approved family member.</p>
-            <label class="field" style="margin-top:18px">
-              <span>Family member</span>
-              <select id="loginName">${memberOptions}</select>
-            </label>
-            ${error ? `<div class="alert">${escapeHtml(error)}</div>` : ""}
-            <button class="btn full" id="loginBtn">Sign in</button>
-            <div class="help">
-              <strong>Approved names</strong><br />
-              ${state.familyMembers.map((m) => escapeHtml(m.name)).join(" · ")}
-            </div>
-          </section>
-        </div>
-      </div>`;
-    document.getElementById("loginBtn").addEventListener("click", () => {
-      const selectedName = document.getElementById("loginName").value;
-      const member = state.familyMembers.find((m) => m.name === selectedName);
-      if (!member) {
-        renderLogin("This name is not approved for this private family app.");
-        return;
-      }
-      setState((prev) => ({ ...prev, currentUser: member }));
-      window.location.hash = "#home";
-    });
-  }
-
-  function renderShell(content) {
-    app.innerHTML = `
-      <div class="page">
-        <header class="header">
-          <div class="header-inner">
-            <button class="logo" id="homeLogo">
-              <span class="logo-icon">📦</span>
-              <span><span class="logo-title">BinView</span><span class="logo-sub">Private family bins</span></span>
-            </button>
-            <nav class="nav">
-              <button class="btn ${getRoute().page === "home" ? "" : "secondary"}" id="navBins">Bins</button>
-              <button class="btn ${getRoute().page === "family" ? "" : "secondary"}" id="navFamily">Family</button>
-            </nav>
-            <div class="actions">
-              <div class="user-pill"><strong>${escapeHtml(state.currentUser.name)}</strong>${escapeHtml(state.currentUser.role)}</div>
-              <button class="btn secondary" id="logoutBtn">Logout</button>
-            </div>
-          </div>
-        </header>
-        ${content}
-      </div>`;
-    document.getElementById("homeLogo").addEventListener("click", () => (window.location.hash = "#home"));
-    document.getElementById("navBins").addEventListener("click", () => (window.location.hash = "#home"));
-    document.getElementById("navFamily").addEventListener("click", () => (window.location.hash = "#family"));
-    document.getElementById("logoutBtn").addEventListener("click", () => setState((prev) => ({ ...prev, currentUser: null })));
-    attachPageHandlers();
-  }
-
-  function renderHome() {
-    const query = sessionStorage.getItem("binview_query") || "";
-    const q = query.toLowerCase();
-    const bins = state.bins.filter((b) => [b.name, b.location, b.category, b.notes].join(" ").toLowerCase().includes(q));
-    const cards = bins.map((bin) => `
-      <button class="bin-card" data-open-bin="${escapeHtml(bin.id)}">
-        <div class="bin-top"><div class="iconbox">📦</div><span class="photo-pill">${bin.photos.length} photos</span></div>
-        <h3>${escapeHtml(bin.name)}</h3>
-        <div class="meta"><span>📍 ${escapeHtml(bin.location || "No location")}</span><span>🏷️ ${escapeHtml(bin.category || "No category")}</span></div>
-        ${bin.notes ? `<p class="note">${escapeHtml(bin.notes)}</p>` : ""}
-      </button>`).join("");
-    return `
-      <main class="container">
-        <div class="title-row">
-          <div><h2>Storage bins</h2><p>Search, create, and open your private bin photo inventory.</p></div>
-          ${canEdit() ? `<button class="btn" id="createBinBtn">+ Create new bin</button>` : ""}
-        </div>
-        <div class="card search"><span>🔎</span><input class="input" id="searchInput" value="${escapeHtml(query)}" placeholder="Search by bin name, location, category, or note" /></div>
-        <div class="grid bins">${cards}</div>
-        ${bins.length === 0 ? `<div class="card empty"><h3>No bins found</h3><p>Try another search or create a new bin.</p></div>` : ""}
-      </main>`;
-  }
-
-  function renderBin(id) {
-    const bin = state.bins.find((b) => b.id === id);
-    if (!bin) {
-      return `<main class="container"><section class="card empty"><h2>Bin not found</h2><p>This QR link does not match an existing bin on this device/browser.</p><button class="btn" id="backHomeBtn">Back to bins</button></section></main>`;
-    }
-    const photos = bin.photos.map((photo) => `
-      <div class="photo-card">
-        <img src="${photo.url}" alt="${escapeHtml(photo.caption || "Bin photo")}" />
-        <div class="photo-body">
-          ${canEdit() ? `<input class="input caption-input" data-photo-id="${escapeHtml(photo.id)}" value="${escapeHtml(photo.caption || "")}" placeholder="Photo caption" />` : `<strong>${escapeHtml(photo.caption || "Photo")}</strong>`}
-          <div class="photo-foot"><span>${new Date(photo.createdAt).toLocaleDateString()}</span>${canEdit() ? `<button class="btn danger" data-delete-photo="${escapeHtml(photo.id)}">Delete</button>` : ""}</div>
-        </div>
-      </div>`).join("");
-    return `
-      <main class="container">
-        <div class="title-row">
-          <div><button class="btn secondary" id="backHomeBtn">← Back to bins</button><h2 style="margin-top:14px">${escapeHtml(bin.name)}</h2><p>Private QR inventory page</p></div>
-          <div class="actions"><button class="btn secondary" id="showQrBtn">🔳 QR label</button>${canEdit() ? `<button class="btn secondary" id="editBinBtn">Edit</button><button class="btn danger" id="deleteBinBtn">Delete</button>` : ""}</div>
-        </div>
-        <div class="grid two">
-          <section class="card">
-            <h3>Bin details</h3>
-            <div class="detail-list" style="margin-top:18px">
-              <div><div class="label">Location</div><p>${escapeHtml(bin.location || "No location added")}</p></div>
-              <div><div class="label">Category</div><p>${escapeHtml(bin.category || "No category added")}</p></div>
-              <div><div class="label">Notes</div><p>${escapeHtml(bin.notes || "No notes added")}</p></div>
-            </div>
-            <div class="help"><strong>Private access</strong><br />Only approved family names can open this prototype app.</div>
-          </section>
-          <section class="card">
-            <div class="title-row" style="margin-bottom:18px">
-              <div><h3>Photos</h3><p>Take photos before closing the bin.</p></div>
-              ${canEdit() ? `<div class="actions"><button class="btn secondary" id="cameraBtn">📷 Camera</button><button class="btn" id="uploadBtn">Upload</button></div>` : ""}
-            </div>
-            <input id="cameraInput" class="hidden" type="file" accept="image/*" capture="environment" multiple />
-            <input id="fileInput" class="hidden" type="file" accept="image/*" multiple />
-            ${bin.photos.length === 0 ? `<div class="empty"><h3>No photos yet</h3><p>Add photos of the items before you close the bin.</p></div>` : `<div class="photo-grid">${photos}</div>`}
-          </section>
-        </div>
-      </main>`;
-  }
-
-  function renderFamily() {
-    const members = state.familyMembers.map((m) => `
-      <div class="member"><div><strong>${escapeHtml(m.name)}</strong><p>${escapeHtml(m.role)}</p></div>${state.currentUser.role === "Owner" && m.role !== "Owner" ? `<button class="btn danger" data-remove-member="${escapeHtml(m.name)}">Remove</button>` : ""}</div>`).join("");
-    return `
-      <main class="container">
-        <div class="title-row"><div><h2>Family access</h2><p>Control which names can open this simple private family app.</p></div></div>
-        <section class="card"><h3>Approved family members</h3><p>Prototype access list. Firebase login is needed later for real security.</p><div style="margin-top:12px">${members}</div></section>
-        <section class="card" style="margin-top:18px">
-          <h3>Add family member</h3>
-          ${state.currentUser.role !== "Owner" ? `<div class="help">Only the Owner can add or remove family members.</div>` : `
-            <div class="grid" style="grid-template-columns:1fr 150px auto;margin-top:14px">
-              <label class="field"><span>Name</span><input class="input" id="newMemberName" placeholder="Family name" /></label>
-              <label class="field"><span>Role</span><select id="newMemberRole"><option>Viewer</option><option>Admin</option></select></label>
-              <button class="btn" id="addMemberBtn" style="align-self:end;margin-bottom:14px">Add</button>
-            </div>`}
-        </section>
-        <div class="help"><strong>Role guide</strong><br />Owner can manage family access. Admin can create/edit bins and photos. Viewer can only scan and view bin contents.</div>
-      </main>`;
-  }
-
-  function attachPageHandlers() {
-    const back = document.getElementById("backHomeBtn");
-    if (back) back.addEventListener("click", () => (window.location.hash = "#home"));
-
-    document.querySelectorAll("[data-open-bin]").forEach((el) => {
-      el.addEventListener("click", () => (window.location.hash = "#bin/" + encodeURIComponent(el.dataset.openBin)));
-    });
-
-    const search = document.getElementById("searchInput");
-    if (search) search.addEventListener("input", (e) => { sessionStorage.setItem("binview_query", e.target.value); render(); });
-
-    const create = document.getElementById("createBinBtn");
-    if (create) create.addEventListener("click", showCreateModal);
-
-    const route = getRoute();
-    if (route.page === "bin") attachBinHandlers(route.id);
-    if (route.page === "family") attachFamilyHandlers();
-  }
-
-  function attachBinHandlers(id) {
-    const bin = state.bins.find((b) => b.id === id);
-    if (!bin) return;
-    const cameraBtn = document.getElementById("cameraBtn");
-    const uploadBtn = document.getElementById("uploadBtn");
-    const cameraInput = document.getElementById("cameraInput");
-    const fileInput = document.getElementById("fileInput");
-    if (cameraBtn) cameraBtn.addEventListener("click", () => cameraInput.click());
-    if (uploadBtn) uploadBtn.addEventListener("click", () => fileInput.click());
-    if (cameraInput) cameraInput.addEventListener("change", (e) => addPhotos(id, e.target.files));
-    if (fileInput) fileInput.addEventListener("change", (e) => addPhotos(id, e.target.files));
-
-    const showQr = document.getElementById("showQrBtn");
-    if (showQr) showQr.addEventListener("click", () => showQrModal(bin));
-
-    const edit = document.getElementById("editBinBtn");
-    if (edit) edit.addEventListener("click", () => showEditModal(bin));
-
-    const del = document.getElementById("deleteBinBtn");
-    if (del) del.addEventListener("click", () => {
-      if (!confirm("Delete " + bin.name + "?")) return;
-      setState((prev) => ({ ...prev, bins: prev.bins.filter((b) => b.id !== id) }));
-      window.location.hash = "#home";
-    });
-
-    document.querySelectorAll("[data-delete-photo]").forEach((el) => {
-      el.addEventListener("click", () => {
-        const photoId = el.dataset.deletePhoto;
-        setState((prev) => ({ ...prev, bins: prev.bins.map((b) => b.id === id ? { ...b, photos: b.photos.filter((p) => p.id !== photoId) } : b) }));
-      });
-    });
-
-    document.querySelectorAll(".caption-input").forEach((el) => {
-      el.addEventListener("change", () => {
-        const photoId = el.dataset.photoId;
-        setState((prev) => ({ ...prev, bins: prev.bins.map((b) => b.id === id ? { ...b, photos: b.photos.map((p) => p.id === photoId ? { ...p, caption: el.value } : p) } : b) }));
-      });
-    });
-  }
-
-  function attachFamilyHandlers() {
-    const add = document.getElementById("addMemberBtn");
-    if (add) add.addEventListener("click", () => {
-      const name = document.getElementById("newMemberName").value.trim();
-      const role = document.getElementById("newMemberRole").value;
-      if (!name) return;
-      setState((prev) => {
-        if (prev.familyMembers.some((m) => m.name.toLowerCase() === name.toLowerCase())) return prev;
-        return { ...prev, familyMembers: [...prev.familyMembers, { name, role }] };
-      });
-    });
-    document.querySelectorAll("[data-remove-member]").forEach((el) => {
-      el.addEventListener("click", () => setState((prev) => ({ ...prev, familyMembers: prev.familyMembers.filter((m) => m.name !== el.dataset.removeMember) })));
-    });
-  }
-
-  function addPhotos(binId, files) {
-    const fileList = Array.from(files || []);
-    if (!fileList.length) return;
-    Promise.all(fileList.map((file) => new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve({
-        id: (crypto && crypto.randomUUID) ? crypto.randomUUID() : "photo-" + Date.now() + Math.random(),
-        url: reader.result,
-        caption: file.name.replace(/\.[^.]+$/, ""),
-        createdAt: new Date().toISOString(),
-      });
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    }))).then((photos) => {
-      setState((prev) => ({ ...prev, bins: prev.bins.map((b) => b.id === binId ? { ...b, photos: [...photos, ...b.photos] } : b) }));
-    }).catch((err) => alert("Could not read photos: " + err.message));
-  }
-
-  function showModal(html, after) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "modal-backdrop";
-    wrapper.innerHTML = `<div class="modal">${html}</div>`;
-    document.body.appendChild(wrapper);
-    wrapper.addEventListener("click", (e) => { if (e.target === wrapper) wrapper.remove(); });
-    wrapper.querySelectorAll("[data-close]").forEach((el) => el.addEventListener("click", () => wrapper.remove()));
-    if (after) after(wrapper);
-  }
-
-  function showCreateModal() {
-    showModal(`
-      <div class="modal-head"><div><h2>Create new bin</h2><p>Add the basic label details first.</p></div><button class="btn secondary" data-close>×</button></div>
-      <label class="field"><span>Bin name</span><input class="input" id="mName" placeholder="Garage Bin 04" /></label>
-      <label class="field"><span>Location</span><input class="input" id="mLocation" placeholder="Garage Shelf B" /></label>
-      <label class="field"><span>Category</span><input class="input" id="mCategory" placeholder="Winter clothes" /></label>
-      <label class="field"><span>Notes</span><textarea id="mNotes" placeholder="What is inside?"></textarea></label>
-      <div class="actions" style="justify-content:flex-end"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="saveNewBin">Create bin</button></div>
-    `, (modal) => {
-      modal.querySelector("#saveNewBin").addEventListener("click", () => {
-        const name = modal.querySelector("#mName").value.trim();
-        if (!name) return alert("Please enter a bin name.");
-        let id = makeSlug(name);
-        if (state.bins.some((b) => b.id === id)) id += "-" + String(Date.now()).slice(-4);
-        const newBin = { id, name, location: modal.querySelector("#mLocation").value.trim(), category: modal.querySelector("#mCategory").value.trim(), notes: modal.querySelector("#mNotes").value.trim(), createdAt: new Date().toISOString(), photos: [] };
-        setState((prev) => ({ ...prev, bins: [newBin, ...prev.bins] }));
-        modal.remove();
-        window.location.hash = "#bin/" + encodeURIComponent(id);
-      });
-    });
-  }
-
-  function showEditModal(bin) {
-    showModal(`
-      <div class="modal-head"><div><h2>Edit bin</h2><p>Update details for the QR page.</p></div><button class="btn secondary" data-close>×</button></div>
-      <label class="field"><span>Bin name</span><input class="input" id="mName" value="${escapeHtml(bin.name)}" /></label>
-      <label class="field"><span>Location</span><input class="input" id="mLocation" value="${escapeHtml(bin.location)}" /></label>
-      <label class="field"><span>Category</span><input class="input" id="mCategory" value="${escapeHtml(bin.category)}" /></label>
-      <label class="field"><span>Notes</span><textarea id="mNotes">${escapeHtml(bin.notes)}</textarea></label>
-      <div class="actions" style="justify-content:flex-end"><button class="btn secondary" data-close>Cancel</button><button class="btn" id="saveEditBin">Save</button></div>
-    `, (modal) => {
-      modal.querySelector("#saveEditBin").addEventListener("click", () => {
-        setState((prev) => ({ ...prev, bins: prev.bins.map((b) => b.id === bin.id ? { ...b, name: modal.querySelector("#mName").value.trim() || b.name, location: modal.querySelector("#mLocation").value.trim(), category: modal.querySelector("#mCategory").value.trim(), notes: modal.querySelector("#mNotes").value.trim() } : b) }));
-        modal.remove();
-      });
-    });
-  }
-
-  function showQrModal(bin) {
-    const url = binUrl(bin.id);
-    showModal(`
-      <div class="modal-head"><div><h2>QR label</h2><p>Print and stick this on the bin.</p></div><button class="btn secondary" data-close>×</button></div>
-      <div class="qr-label">
-        <h2>${escapeHtml(bin.name)}</h2>
-        <p>${escapeHtml(bin.location || "Storage bin")}</p>
-        <img src="${qrImageUrl(url)}" alt="QR code for ${escapeHtml(bin.name)}" />
-        <div class="link-box">${escapeHtml(url)}</div>
-      </div>
-      <div class="actions" style="margin-top:14px"><button class="btn secondary" id="copyQrLink">Copy link</button><button class="btn" id="printQr">Print label</button></div>
-    `, (modal) => {
-      modal.querySelector("#copyQrLink").addEventListener("click", async () => {
-        await navigator.clipboard.writeText(url);
-        modal.querySelector("#copyQrLink").textContent = "Copied";
-      });
-      modal.querySelector("#printQr").addEventListener("click", () => window.print());
-    });
-  }
-
-  window.addEventListener("hashchange", render);
+function setBusy(message) {
+  busyMessage = message || "";
   render();
-})();
+}
+
+function setError(message) {
+  errorMessage = message || "";
+  render();
+}
+
+function updateHashForView() {
+  if (activeView === "bin" && selectedBinId) {
+    if (window.location.hash !== `#/bin/${selectedBinId}`) window.location.hash = `#/bin/${selectedBinId}`;
+  } else if (activeView === "family") {
+    if (window.location.hash !== "#/family") window.location.hash = "#/family";
+  } else {
+    if (window.location.hash !== "#/bins") window.location.hash = "#/bins";
+  }
+}
+
+function readRoute() {
+  const hash = window.location.hash || "#/bins";
+  if (hash.startsWith("#/bin/")) {
+    selectedBinId = decodeURIComponent(hash.replace("#/bin/", ""));
+    activeView = "bin";
+  } else if (hash === "#/family") {
+    selectedBinId = null;
+    activeView = "family";
+  } else {
+    selectedBinId = null;
+    activeView = "bins";
+  }
+  render();
+}
+
+async function init() {
+  if (!isConfigured()) {
+    renderSetupRequired();
+    return;
+  }
+
+  try {
+    firebaseApp = initializeApp(firebaseConfig);
+    auth = getAuth(firebaseApp);
+    db = getFirestore(firebaseApp);
+    storage = getStorage(firebaseApp);
+
+    window.addEventListener("hashchange", readRoute);
+    onAuthStateChanged(auth, user => {
+      currentUser = user;
+      currentMember = user ? getMemberForEmail(user.email) : null;
+      if (user && currentMember) {
+        subscribeToBins();
+      } else {
+        unsubscribeBins();
+        bins = [];
+      }
+      readRoute();
+    });
+  } catch (error) {
+    console.error(error);
+    renderFatalError("Firebase could not start. Check firebase-config.js and your Firebase project settings.", error.message);
+  }
+}
+
+function subscribeToBins() {
+  unsubscribeBins();
+  const binsRef = collection(db, "families", FAMILY_ID, "bins");
+  const binsQuery = query(binsRef, orderBy("createdAt", "desc"));
+  binsUnsubscribe = onSnapshot(binsQuery, snapshot => {
+    bins = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    render();
+  }, error => {
+    console.error(error);
+    setError("Could not load bins. Check Firestore rules and make sure your signed-in email is allowed.");
+  });
+}
+
+function unsubscribeBins() {
+  if (binsUnsubscribe) binsUnsubscribe();
+  binsUnsubscribe = null;
+}
+
+async function handleGoogleSignIn() {
+  setError("");
+  try {
+    const result = await signInWithPopup(auth, provider);
+    const member = getMemberForEmail(result.user.email);
+    if (!member) {
+      setError(`The signed-in Google email ${result.user.email} is not in the approved family list. Add it to firebase-config.js and rules, then redeploy.`);
+      await signOut(auth);
+    }
+  } catch (error) {
+    console.error(error);
+    setError(error.message || "Google sign-in failed.");
+  }
+}
+
+async function handleSignOut() {
+  await signOut(auth);
+}
+
+async function createBinFromForm(form) {
+  if (!canEdit()) return;
+  const name = form.name.trim();
+  if (!name) return setError("Bin name is required.");
+  setBusy("Creating bin...");
+  try {
+    const newDoc = await addDoc(collection(db, "families", FAMILY_ID, "bins"), {
+      name,
+      location: form.location.trim(),
+      category: form.category.trim(),
+      notes: form.notes.trim(),
+      photos: [],
+      createdByEmail: currentUser.email,
+      createdByName: currentMember.name,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    createModalOpen = false;
+    selectedBinId = newDoc.id;
+    activeView = "bin";
+    updateHashForView();
+  } catch (error) {
+    console.error(error);
+    setError("Could not create bin. Check Firestore rules and Firebase setup.");
+  } finally {
+    setBusy("");
+  }
+}
+
+async function updateBin(binId, updates) {
+  if (!canEdit()) return;
+  setBusy("Saving...");
+  try {
+    await updateDoc(doc(db, "families", FAMILY_ID, "bins", binId), {
+      ...updates,
+      updatedAt: serverTimestamp()
+    });
+    editModalBin = null;
+  } catch (error) {
+    console.error(error);
+    setError("Could not save changes.");
+  } finally {
+    setBusy("");
+  }
+}
+
+async function deleteBin(bin) {
+  if (!canEdit()) return;
+  const ok = window.confirm(`Delete ${bin.name}? This will remove the bin record. Photos will also be removed when possible.`);
+  if (!ok) return;
+  setBusy("Deleting bin...");
+  try {
+    for (const photo of bin.photos || []) {
+      if (photo.path) {
+        try { await deleteObject(ref(storage, photo.path)); } catch (e) { console.warn("Could not delete photo", e); }
+      }
+    }
+    await deleteDoc(doc(db, "families", FAMILY_ID, "bins", bin.id));
+    selectedBinId = null;
+    activeView = "bins";
+    updateHashForView();
+  } catch (error) {
+    console.error(error);
+    setError("Could not delete bin.");
+  } finally {
+    setBusy("");
+  }
+}
+
+async function addPhotos(bin, files) {
+  if (!canEdit() || !files?.length) return;
+  setBusy(`Uploading ${files.length} photo${files.length > 1 ? "s" : ""}...`);
+  try {
+    const uploaded = [];
+    for (const file of Array.from(files)) {
+      const photoId = crypto.randomUUID();
+      const safeName = makeSafeFileName(file.name || `${photoId}.jpg`);
+      const path = `families/${FAMILY_ID}/bins/${bin.id}/${photoId}-${safeName}`;
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, file, { contentType: file.type || "image/jpeg" });
+      const url = await getDownloadURL(storageRef);
+      uploaded.push({
+        id: photoId,
+        url,
+        path,
+        caption: (file.name || "Photo").replace(/\.[^.]+$/, ""),
+        uploadedBy: currentMember.name,
+        uploadedByEmail: currentUser.email,
+        createdAt: new Date().toISOString()
+      });
+    }
+    await updateDoc(doc(db, "families", FAMILY_ID, "bins", bin.id), {
+      photos: arrayUnion(...uploaded),
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error(error);
+    setError("Could not upload photo. Check Firebase Storage rules and setup.");
+  } finally {
+    setBusy("");
+  }
+}
+
+async function updatePhotoCaption(bin, photoId, caption) {
+  if (!canEdit()) return;
+  const photos = (bin.photos || []).map(p => p.id === photoId ? { ...p, caption } : p);
+  try {
+    await updateDoc(doc(db, "families", FAMILY_ID, "bins", bin.id), { photos, updatedAt: serverTimestamp() });
+  } catch (error) {
+    console.error(error);
+    setError("Could not update photo caption.");
+  }
+}
+
+async function deletePhoto(bin, photo) {
+  if (!canEdit()) return;
+  const ok = window.confirm("Delete this photo?");
+  if (!ok) return;
+  setBusy("Deleting photo...");
+  try {
+    if (photo.path) {
+      try { await deleteObject(ref(storage, photo.path)); } catch (e) { console.warn("Could not delete storage file", e); }
+    }
+    const photos = (bin.photos || []).filter(p => p.id !== photo.id);
+    await updateDoc(doc(db, "families", FAMILY_ID, "bins", bin.id), { photos, updatedAt: serverTimestamp() });
+  } catch (error) {
+    console.error(error);
+    setError("Could not delete photo.");
+  } finally {
+    setBusy("");
+  }
+}
+
+async function copyText(text) {
+  await navigator.clipboard.writeText(text);
+  setBusy("Copied link");
+  setTimeout(() => setBusy(""), 900);
+}
+
+function render() {
+  if (!isConfigured()) return renderSetupRequired();
+  if (!auth) return renderLoading();
+  if (!currentUser) return renderLogin();
+  if (!currentMember) return renderUnauthorized();
+
+  const body = activeView === "family"
+    ? renderFamilyPage()
+    : activeView === "bin"
+      ? renderBinPage()
+      : renderBinsPage();
+
+  appRoot.innerHTML = `
+    <div class="app-shell">
+      ${renderHeader()}
+      ${renderStatus()}
+      ${body}
+      ${createModalOpen ? renderCreateModal() : ""}
+      ${editModalBin ? renderEditModal(editModalBin) : ""}
+      ${qrModalBin ? renderQrModal(qrModalBin) : ""}
+    </div>
+  `;
+  bindCommonEvents();
+  if (qrModalBin) drawQrCode(qrModalBin);
+}
+
+function renderLoading() {
+  appRoot.innerHTML = `<div class="loading"><div><div class="spinner"></div><h2>Loading BinView...</h2></div></div>`;
+}
+
+function renderStatus() {
+  return `
+    <div class="page" style="padding-bottom:0; ${(!errorMessage && !busyMessage) ? "display:none" : ""}">
+      ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)} <button class="btn btn-ghost" data-action="clear-error">Close</button></div>` : ""}
+      ${busyMessage ? `<div class="notice ok" style="margin-top:8px">${escapeHtml(busyMessage)}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderSetupRequired() {
+  appRoot.innerHTML = `
+    <div class="center-page">
+      <div class="card" style="max-width: 820px; width: 100%;">
+        <span class="badge warn">${icons.lock} Firebase setup required</span>
+        <h1 style="margin-top:18px">Connect BinView to Firebase</h1>
+        <p class="lead">Before this cloud version can run, you need to edit <b>firebase-config.js</b> with your Firebase project values and your real family Google emails.</p>
+        <div class="notice warn" style="margin-top:20px">Do not leave the placeholder values like <b>PASTE_YOUR_API_KEY_HERE</b> or <b>REPLACE_ELAD_EMAIL@gmail.com</b>.</div>
+        <pre class="setup-code" style="margin-top:16px">firebase-config.js
+firebase.rules
+storage.rules</pre>
+      </div>
+    </div>
+  `;
+}
+
+function renderFatalError(title, detail) {
+  appRoot.innerHTML = `
+    <div class="center-page"><div class="card" style="max-width:760px"><span class="badge warn">Error</span><h1 style="margin-top:18px">${escapeHtml(title)}</h1><p class="lead">${escapeHtml(detail || "")}</p></div></div>
+  `;
+}
+
+function renderLogin() {
+  appRoot.innerHTML = `
+    <div class="center-page">
+      <div class="grid-2">
+        <section class="card">
+          <span class="badge">${icons.lock} Private family cloud app</span>
+          <h1 style="margin-top:18px">BinView</h1>
+          <p class="lead">Create QR labels for closed garage storage bins. Your family signs in with Google, scans the bin label, and sees the photos and notes for what is inside.</p>
+          <div class="grid-3" style="margin-top:26px">
+            <div class="icon-card"><div class="icon">${icons.package}</div><h3 style="margin-top:10px">Create bins</h3><p class="small">Name, location, category, and notes.</p></div>
+            <div class="icon-card"><div class="icon">${icons.camera}</div><h3 style="margin-top:10px">Add photos</h3><p class="small">Upload from phone or use camera.</p></div>
+            <div class="icon-card"><div class="icon">${icons.qr}</div><h3 style="margin-top:10px">Scan QR</h3><p class="small">Open the private cloud page.</p></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="icon">G</div>
+          <h2 style="margin-top:14px">Sign in with Google</h2>
+          <p class="small" style="margin-top:8px">Only the approved family emails in your Firebase rules can read or write data.</p>
+          ${errorMessage ? `<div class="notice error" style="margin-top:16px">${escapeHtml(errorMessage)}</div>` : ""}
+          <button class="btn btn-primary btn-wide" style="margin-top:18px" data-action="google-signin">Sign in with Google</button>
+          <div class="notice warn" style="margin-top:16px">Make sure your GitHub Pages domain is added to Firebase Authentication authorized domains.</div>
+        </section>
+      </div>
+    </div>
+  `;
+  document.querySelector('[data-action="google-signin"]')?.addEventListener("click", handleGoogleSignIn);
+}
+
+function renderUnauthorized() {
+  appRoot.innerHTML = `
+    <div class="center-page">
+      <div class="card" style="max-width:720px; width:100%">
+        <span class="badge warn">${icons.lock} Not approved</span>
+        <h1 style="margin-top:18px">This Google account is not in the family list</h1>
+        <p class="lead">Signed in as <b>${escapeHtml(currentUser.email)}</b>. Add this email to <b>firebase-config.js</b>, <b>firestore.rules</b>, and <b>storage.rules</b>, then redeploy.</p>
+        <button class="btn btn-primary" style="margin-top:20px" data-action="signout">Sign out</button>
+      </div>
+    </div>
+  `;
+  document.querySelector('[data-action="signout"]')?.addEventListener("click", handleSignOut);
+}
+
+function renderHeader() {
+  return `
+    <header class="header">
+      <div class="header-inner">
+        <button class="brand" data-action="go-bins">
+          <div class="brand-mark">${icons.package}</div>
+          <div style="text-align:left"><div class="brand-title">BinView</div><div class="tiny">Family cloud storage</div></div>
+        </button>
+        <nav class="nav">
+          <button class="btn ${activeView === "bins" ? "btn-primary" : "btn-ghost"}" data-action="go-bins">Bins</button>
+          <button class="btn ${activeView === "family" ? "btn-primary" : "btn-ghost"}" data-action="go-family">Family</button>
+          <div class="user-pill"><div class="tiny">${escapeHtml(currentMember.name)} · ${escapeHtml(currentMember.role)}</div><div class="tiny">${escapeHtml(currentUser.email)}</div></div>
+          <button class="btn btn-secondary" data-action="signout">Logout</button>
+        </nav>
+      </div>
+    </header>
+  `;
+}
+
+function renderBinsPage() {
+  const filtered = bins.filter(bin => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return [bin.name, bin.location, bin.category, bin.notes].join(" ").toLowerCase().includes(q);
+  });
+
+  return `
+    <main class="page">
+      <div class="toolbar">
+        <div>
+          <h2>Storage bins</h2>
+          <p class="small" style="margin-top:6px">Shared cloud list for approved family members.</p>
+        </div>
+        ${canEdit() ? `<button class="btn btn-primary" data-action="open-create">+ Create new bin</button>` : ""}
+      </div>
+      <div class="search"><span>${icons.search}</span><input id="searchInput" value="${escapeHtml(searchQuery)}" placeholder="Search by bin, shelf, category, or notes..." /></div>
+      ${filtered.length === 0 ? `<div class="empty"><h3>No bins found</h3><p class="small" style="margin-top:6px">Create your first bin or adjust the search.</p></div>` : ""}
+      <div class="bin-grid">
+        ${filtered.map(renderBinCard).join("")}
+      </div>
+    </main>
+  `;
+}
+
+function renderBinCard(bin) {
+  return `
+    <button class="bin-card" data-action="open-bin" data-bin-id="${escapeHtml(bin.id)}">
+      <div class="bin-card-top">
+        <div class="bin-icon">${icons.package}</div>
+        <span class="badge">${(bin.photos || []).length} photos</span>
+      </div>
+      <h3>${escapeHtml(bin.name || "Untitled bin")}</h3>
+      <div class="meta">
+        <div>${icons.pin} ${escapeHtml(bin.location || "No location")}</div>
+        <div>🏷️ ${escapeHtml(bin.category || "No category")}</div>
+      </div>
+      ${bin.notes ? `<p class="notes-preview">${escapeHtml(bin.notes)}</p>` : ""}
+    </button>
+  `;
+}
+
+function renderBinPage() {
+  const bin = bins.find(b => b.id === selectedBinId);
+  if (!bin) {
+    return `<main class="page"><div class="empty"><h2>Bin not found</h2><p class="small" style="margin-top:8px">This QR code may point to a deleted bin, or your account may not have access.</p><button class="btn btn-primary" style="margin-top:18px" data-action="go-bins">Back to bins</button></div></main>`;
+  }
+  const photos = bin.photos || [];
+  return `
+    <main class="page">
+      <div class="toolbar">
+        <div>
+          <button class="btn btn-ghost" data-action="go-bins">← Back to bins</button>
+          <h2 style="margin-top:8px">${escapeHtml(bin.name || "Untitled bin")}</h2>
+          <p class="small" style="margin-top:6px">Private cloud QR inventory page</p>
+        </div>
+        <div class="actions">
+          <button class="btn btn-secondary" data-action="open-qr" data-bin-id="${escapeHtml(bin.id)}">${icons.qr} QR label</button>
+          ${canEdit() ? `<button class="btn btn-secondary" data-action="open-edit" data-bin-id="${escapeHtml(bin.id)}">${icons.edit} Edit</button><button class="btn btn-danger" data-action="delete-bin" data-bin-id="${escapeHtml(bin.id)}">${icons.trash} Delete</button>` : ""}
+        </div>
+      </div>
+      <div class="detail-grid">
+        <section class="card">
+          <span class="badge ok">${icons.lock} Private family access</span>
+          <div class="detail-list">
+            <div><div class="label-small">Location</div><p>${escapeHtml(bin.location || "No location added")}</p></div>
+            <div><div class="label-small">Category</div><p>${escapeHtml(bin.category || "No category added")}</p></div>
+            <div><div class="label-small">Notes</div><p style="white-space:pre-wrap; line-height:1.6">${escapeHtml(bin.notes || "No notes added")}</p></div>
+            <div><div class="label-small">Last updated</div><p>${escapeHtml(fmtDate(bin.updatedAt) || fmtDate(bin.createdAt) || "")}</p></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="toolbar" style="margin-bottom:14px">
+            <div><h2>Photos</h2><p class="small" style="margin-top:6px">Add photos before closing the bin.</p></div>
+            ${canEdit() ? `<div class="actions"><input class="hidden" id="cameraInput" type="file" accept="image/*" capture="environment" multiple /><input class="hidden" id="fileInput" type="file" accept="image/*" multiple /><button class="btn btn-secondary" data-action="trigger-camera">${icons.camera} Camera</button><button class="btn btn-primary" data-action="trigger-upload">${icons.upload} Upload</button></div>` : ""}
+          </div>
+          ${photos.length === 0 ? `<div class="empty"><h3>No photos yet</h3><p class="small" style="margin-top:6px">Upload or take photos so the QR code will show what is inside.</p></div>` : `<div class="photo-grid">${photos.map(photo => renderPhotoCard(bin, photo)).join("")}</div>`}
+        </section>
+      </div>
+    </main>
+  `;
+}
+
+function renderPhotoCard(bin, photo) {
+  return `
+    <div class="photo-card">
+      <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.caption || "Bin photo")}" loading="lazy" />
+      <div class="photo-card-body">
+        ${canEdit() ? `<input class="caption-input" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}" value="${escapeHtml(photo.caption || "")}" placeholder="Photo caption" />` : `<h3>${escapeHtml(photo.caption || "Photo")}</h3>`}
+        <div class="photo-card-footer">
+          <span class="tiny">${escapeHtml(photo.uploadedBy || "Family")} · ${escapeHtml(fmtDate(photo.createdAt))}</span>
+          ${canEdit() ? `<button class="btn btn-danger" data-action="delete-photo" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}">${icons.trash}</button>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderFamilyPage() {
+  return `
+    <main class="page" style="max-width:840px">
+      <div class="toolbar"><div><h2>Family access</h2><p class="small" style="margin-top:6px">These are the approved family members from firebase-config.js.</p></div></div>
+      <section class="card">
+        ${FAMILY_MEMBERS.map(member => `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:1px solid var(--line)">
+            <div><h3>${escapeHtml(member.name)}</h3><p class="small">${escapeHtml(member.email)}</p></div>
+            <span class="badge">${escapeHtml(member.role)}</span>
+          </div>
+        `).join("")}
+      </section>
+      <div class="notice warn" style="margin-top:16px">For real security, update family members by editing <b>firebase-config.js</b>, <b>firestore.rules</b>, and <b>storage.rules</b>, then commit the changes.</div>
+    </main>
+  `;
+}
+
+function renderCreateModal() {
+  return `
+    <div class="modal-backdrop"><div class="modal">
+      <div class="modal-head"><div><h2>Create new bin</h2><p class="small" style="margin-top:6px">Add the label details first.</p></div><button class="btn btn-ghost" data-action="close-modals">✕</button></div>
+      <form class="form" id="createBinForm">
+        ${fieldHtml("name", "Bin name", "Garage Bin 01")}
+        ${fieldHtml("location", "Location", "Garage Shelf A")}
+        ${fieldHtml("category", "Category", "Kids toys")}
+        ${fieldHtml("notes", "Notes", "Small toys, Lego parts, and games", true)}
+        <div class="actions" style="justify-content:flex-end"><button class="btn btn-secondary" type="button" data-action="close-modals">Cancel</button><button class="btn btn-primary" type="submit">Create bin</button></div>
+      </form>
+    </div></div>
+  `;
+}
+
+function renderEditModal(bin) {
+  return `
+    <div class="modal-backdrop"><div class="modal">
+      <div class="modal-head"><div><h2>Edit bin</h2><p class="small" style="margin-top:6px">Update details shown after QR scan.</p></div><button class="btn btn-ghost" data-action="close-modals">✕</button></div>
+      <form class="form" id="editBinForm" data-bin-id="${escapeHtml(bin.id)}">
+        ${fieldHtml("name", "Bin name", "", false, bin.name)}
+        ${fieldHtml("location", "Location", "", false, bin.location)}
+        ${fieldHtml("category", "Category", "", false, bin.category)}
+        ${fieldHtml("notes", "Notes", "", true, bin.notes)}
+        <div class="actions" style="justify-content:flex-end"><button class="btn btn-secondary" type="button" data-action="close-modals">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>
+      </form>
+    </div></div>
+  `;
+}
+
+function renderQrModal(bin) {
+  const url = getBinUrl(bin.id);
+  return `
+    <div class="modal-backdrop"><div class="modal">
+      <div class="modal-head"><div><h2>QR label</h2><p class="small" style="margin-top:6px">Print and stick this on the bin.</p></div><button class="btn btn-ghost" data-action="close-modals">✕</button></div>
+      <div class="qr-box">
+        <h2>${escapeHtml(bin.name || "Storage bin")}</h2>
+        <p class="small" style="margin-top:6px">${escapeHtml(bin.location || "Family storage")}</p>
+        <div class="qr-canvas-wrap"><canvas id="qrCanvas" width="220" height="220"></canvas></div>
+        <div class="copy-url">${escapeHtml(url)}</div>
+      </div>
+      <div class="actions" style="justify-content:flex-end; margin-top:14px"><button class="btn btn-secondary" data-action="copy-url" data-url="${escapeHtml(url)}">Copy link</button><button class="btn btn-primary" data-action="print">Print label</button></div>
+    </div></div>
+  `;
+}
+
+function fieldHtml(name, label, placeholder, textarea = false, value = "") {
+  const safeValue = escapeHtml(value || "");
+  return `<label class="field"><span>${escapeHtml(label)}</span>${textarea ? `<textarea name="${name}" placeholder="${escapeHtml(placeholder)}">${safeValue}</textarea>` : `<input name="${name}" value="${safeValue}" placeholder="${escapeHtml(placeholder)}" />`}</label>`;
+}
+
+function drawQrCode(bin) {
+  const canvas = document.getElementById("qrCanvas");
+  if (!canvas || !window.QRCode) return;
+  window.QRCode.toCanvas(canvas, getBinUrl(bin.id), { width: 220, margin: 2 }, error => {
+    if (error) console.error(error);
+  });
+}
+
+function bindCommonEvents() {
+  document.querySelectorAll('[data-action="clear-error"]').forEach(el => el.addEventListener("click", () => setError("")));
+  document.querySelectorAll('[data-action="signout"]').forEach(el => el.addEventListener("click", handleSignOut));
+  document.querySelectorAll('[data-action="go-bins"]').forEach(el => el.addEventListener("click", () => { activeView = "bins"; selectedBinId = null; updateHashForView(); render(); }));
+  document.querySelectorAll('[data-action="go-family"]').forEach(el => el.addEventListener("click", () => { activeView = "family"; selectedBinId = null; updateHashForView(); render(); }));
+  document.querySelectorAll('[data-action="open-create"]').forEach(el => el.addEventListener("click", () => { createModalOpen = true; render(); }));
+  document.querySelectorAll('[data-action="close-modals"]').forEach(el => el.addEventListener("click", () => { createModalOpen = false; editModalBin = null; qrModalBin = null; render(); }));
+  document.querySelectorAll('[data-action="open-bin"]').forEach(el => el.addEventListener("click", () => { selectedBinId = el.dataset.binId; activeView = "bin"; updateHashForView(); render(); }));
+  document.querySelectorAll('[data-action="open-qr"]').forEach(el => el.addEventListener("click", () => { qrModalBin = bins.find(b => b.id === el.dataset.binId); render(); }));
+  document.querySelectorAll('[data-action="open-edit"]').forEach(el => el.addEventListener("click", () => { editModalBin = bins.find(b => b.id === el.dataset.binId); render(); }));
+  document.querySelectorAll('[data-action="delete-bin"]').forEach(el => el.addEventListener("click", () => { const bin = bins.find(b => b.id === el.dataset.binId); if (bin) deleteBin(bin); }));
+  document.querySelectorAll('[data-action="copy-url"]').forEach(el => el.addEventListener("click", () => copyText(el.dataset.url)));
+  document.querySelectorAll('[data-action="print"]').forEach(el => el.addEventListener("click", () => window.print()));
+
+  const searchInput = document.getElementById("searchInput");
+  if (searchInput) {
+    searchInput.addEventListener("input", e => { searchQuery = e.target.value; render(); });
+    searchInput.focus({ preventScroll: true });
+  }
+
+  const createForm = document.getElementById("createBinForm");
+  if (createForm) {
+    createForm.addEventListener("submit", e => {
+      e.preventDefault();
+      const data = new FormData(createForm);
+      createBinFromForm({ name: data.get("name") || "", location: data.get("location") || "", category: data.get("category") || "", notes: data.get("notes") || "" });
+    });
+  }
+
+  const editForm = document.getElementById("editBinForm");
+  if (editForm) {
+    editForm.addEventListener("submit", e => {
+      e.preventDefault();
+      const data = new FormData(editForm);
+      updateBin(editForm.dataset.binId, { name: String(data.get("name") || "").trim(), location: String(data.get("location") || "").trim(), category: String(data.get("category") || "").trim(), notes: String(data.get("notes") || "").trim() });
+    });
+  }
+
+  const cameraInput = document.getElementById("cameraInput");
+  const fileInput = document.getElementById("fileInput");
+  const selectedBin = bins.find(b => b.id === selectedBinId);
+  document.querySelectorAll('[data-action="trigger-camera"]').forEach(el => el.addEventListener("click", () => cameraInput?.click()));
+  document.querySelectorAll('[data-action="trigger-upload"]').forEach(el => el.addEventListener("click", () => fileInput?.click()));
+  cameraInput?.addEventListener("change", e => addPhotos(selectedBin, e.target.files));
+  fileInput?.addEventListener("change", e => addPhotos(selectedBin, e.target.files));
+
+  document.querySelectorAll('[data-action="delete-photo"]').forEach(el => el.addEventListener("click", () => {
+    const bin = bins.find(b => b.id === el.dataset.binId);
+    const photo = (bin?.photos || []).find(p => p.id === el.dataset.photoId);
+    if (bin && photo) deletePhoto(bin, photo);
+  }));
+
+  document.querySelectorAll(".caption-input").forEach(input => {
+    input.addEventListener("change", () => {
+      const bin = bins.find(b => b.id === input.dataset.binId);
+      if (bin) updatePhotoCaption(bin, input.dataset.photoId, input.value);
+    });
+  });
+}
+
+init();
