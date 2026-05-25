@@ -1,10 +1,10 @@
 # BinView Private Family MVP
 
-BinView is a small private-family prototype for creating QR labels for closed storage bins.
+BinView is a small private-family prototype for creating QR labels for closed garage storage bins.
 
 You can:
 
-- Sign in with an approved family member name
+- Sign in with an approved family name and shared family PIN
 - Create a storage bin
 - Add bin location, category, and notes
 - Take/upload photos of the bin contents
@@ -13,13 +13,13 @@ You can:
 - Scan the QR later to open the bin page
 - Manage simple family roles: Owner, Admin, Viewer
 
-> Important: This MVP uses browser local storage only. It is good for experimenting with the flow and UI. The name-based family gate is not real security because the site is hosted as static files. For true private family access across devices, the next version should use Firebase Authentication, Firestore, Firebase Storage, and security rules.
+> Important: This MVP uses browser local storage only. It is good for experimenting with the flow and UI. It is not yet a true cloud/private family app across devices. The next version should use Firebase Authentication, Firestore, Firebase Storage, and security rules.
 
 ---
 
-## Approved family names
+## Approved family members
 
-Use one of these names on the login screen:
+The app is configured for these family members:
 
 ```text
 Elad
@@ -29,13 +29,46 @@ Maya
 Daniel
 ```
 
+Default roles:
+
+| Family Member | Role |
+|---|---|
+| Elad | Owner |
+| Maayan | Admin |
+| Michal | Viewer |
+| Maya | Viewer |
+| Daniel | Viewer |
+
+Default family PIN:
+
+```text
+1234
+```
+
+You can change the PIN after signing in as **Elad / Owner** by opening **Family → Family PIN**.
+
 Role behavior:
 
-| Role | View Bins | Add/Edit Bins | Add Photos | Manage Family |
+| Role | View Bins | Add/Edit Bins | Add Photos | Manage Family / PIN |
 |---|---:|---:|---:|---:|
 | Owner | Yes | Yes | Yes | Yes |
 | Admin | Yes | Yes | Yes | No |
 | Viewer | Yes | No | No | No |
+
+---
+
+## Privacy note
+
+This is a lightweight prototype for simple garage-bin storage.
+
+Because it is a static GitHub Pages app using browser local storage:
+
+- The name + PIN gate is only a simple access screen, not strong security.
+- Photos are stored only in the browser/device where they were uploaded.
+- A QR created on one phone will not show the same photos on another phone yet.
+- Do not store sensitive personal documents, passwords, medical information, financial records, or anything private in this prototype.
+
+For real private access across all family phones, use the Firebase version.
 
 ---
 
@@ -95,20 +128,21 @@ https://YOUR-GITHUB-USERNAME.github.io/binview-private-family-mvp/
 Once GitHub Pages is live:
 
 1. Open the live link from your phone.
-2. Sign in with `Elad`.
-3. Create a bin.
-4. Use **Camera** to take photos.
-5. Open **QR label**.
-6. Print the label or copy the link.
-7. Scan the QR from the same browser/device to test the flow.
+2. Select **Elad**.
+3. Enter PIN `1234`.
+4. Create a bin.
+5. Use **Camera** to take photos.
+6. Open **QR label**.
+7. Print the label or copy the link.
+8. Scan the QR from the same browser/device to test the flow.
 
-Because this is local-storage only, a QR created on one phone will not show the same photos on another phone yet. That requires the Firebase version.
+Because this is local-storage only, test the QR on the same phone/browser where you created the bin.
 
 ---
 
 ## Recommended next version
 
-V1.1 should replace local storage with:
+V1.2 should replace local storage with:
 
 - Firebase Authentication for real Google login
 - Firestore for bin records
@@ -133,7 +167,7 @@ This project uses:
 
 - Vite
 - React
-- Tailwind CSS 3.4.17, pinned to avoid the Tailwind v4 PostCSS plugin change during GitHub Actions builds
+- Tailwind CSS
 - qrcode.react
 - lucide-react
 - framer-motion

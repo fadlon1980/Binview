@@ -24,7 +24,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react'
 
 const APP_NAME = 'BinView'
-const STORAGE_KEY = 'binview_private_family_mvp_v2'
+const STORAGE_KEY = 'binview_private_family_names_mvp_v2'
 
 const defaultFamilyMembers = [
   { name: 'Elad', role: 'Owner' },
@@ -50,6 +50,7 @@ function createInitialState() {
   return {
     currentUser: null,
     familyMembers: defaultFamilyMembers,
+    accessPin: '1234',
     bins: demoBins,
   }
 }
@@ -62,7 +63,14 @@ function createId() {
 function safeLoad() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : createInitialState()
+    if (!raw) return createInitialState()
+    const parsed = JSON.parse(raw)
+    return {
+      ...createInitialState(),
+      ...parsed,
+      familyMembers: Array.isArray(parsed.familyMembers) ? parsed.familyMembers : defaultFamilyMembers,
+      accessPin: parsed.accessPin || '1234',
+    }
   } catch {
     return createInitialState()
   }
@@ -157,7 +165,8 @@ function Field({ label, value, onChange, placeholder, disabled, textarea = false
 }
 
 function LoginScreen({ state, setState }) {
-  const [name, setName] = useState('Elad')
+  const [name, setName] = useState(state.familyMembers[0]?.name || 'Elad')
+  const [pin, setPin] = useState('')
   const [error, setError] = useState('')
 
   function signIn() {
@@ -165,6 +174,10 @@ function LoginScreen({ state, setState }) {
     const role = getRole(normalized, state.familyMembers)
     if (!role) {
       setError('This name is not approved for this private family app.')
+      return
+    }
+    if (pin !== state.accessPin) {
+      setError('Wrong family PIN.')
       return
     }
     setState((prev) => ({ ...prev, currentUser: { name: normalized, role } }))
@@ -176,11 +189,11 @@ function LoginScreen({ state, setState }) {
         <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="grid w-full gap-6 md:grid-cols-[1.1fr_0.9fr]">
           <Card className="p-7 md:p-9">
             <div className="mb-7 inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700">
-              <Lock className="h-4 w-4" /> Private family garage-bin app
+              <Lock className="h-4 w-4" /> Private family storage app
             </div>
             <h1 className="text-4xl font-semibold tracking-tight md:text-5xl">{APP_NAME}</h1>
             <p className="mt-4 max-w-xl text-base leading-7 text-slate-600">
-              Create QR labels for closed storage bins. Scan the QR later to see the photos and notes for what is inside — only approved family members can view it in this prototype.
+              Create QR labels for closed garage storage bins. Scan the QR later to see the photos and notes for what is inside — access is limited to your family names plus a shared family PIN.
             </p>
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl bg-slate-50 p-4">
@@ -208,17 +221,40 @@ function LoginScreen({ state, setState }) {
               </div>
               <div>
                 <h2 className="text-xl font-semibold">Family sign in</h2>
-                <p className="text-sm text-slate-500">Prototype login using approved family names.</p>
+                <p className="text-sm text-slate-500">Select your name and enter the family PIN.</p>
               </div>
             </div>
-            <Field label="Family member name" value={name} onChange={setName} placeholder="Elad" />
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-slate-700">Family member</span>
+              <select
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+              >
+                {state.familyMembers.map((member) => (
+                  <option key={member.name} value={member.name}>{member.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="mt-4 block">
+              <span className="mb-1.5 block text-sm font-medium text-slate-700">Family PIN</span>
+              <input
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="Enter PIN"
+                type="password"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400"
+                onKeyDown={(e) => { if (e.key === 'Enter') signIn() }}
+              />
+            </label>
             {error && <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
             <Button onClick={signIn} className="mt-5 w-full">
               <Lock className="h-4 w-4" /> Sign in
             </Button>
             <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-              <p className="font-medium text-slate-800">Approved family names</p>
-              <p className="mt-1">Elad · Maayan · Michal · Maya · Daniel</p>
+              <p className="font-medium text-slate-800">Approved family members</p>
+              <p className="mt-1">{state.familyMembers.map((member) => member.name).join(' · ')}</p>
+              <p className="mt-3 text-xs text-slate-500">Prototype default PIN: 1234. Change it from Family Access after signing in as Owner.</p>
             </div>
           </Card>
         </motion.div>
@@ -498,7 +534,7 @@ function BinDetailScreen({ bin, setBins, currentUser, goHome }) {
           </div>
           <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
             <p className="font-medium text-slate-800">Private access</p>
-            <p className="mt-1">Only approved family names can open this bin page after login.</p>
+            <p className="mt-1">Only approved family members can open this bin page after login with the family PIN.</p>
           </div>
         </Card>
 
@@ -637,27 +673,35 @@ function QRCodeModal({ bin, binUrl, copied, onCopy, onClose }) {
 }
 
 function FamilyScreen({ state, setState }) {
-  const [memberName, setMemberName] = useState('')
+  const [name, setName] = useState('')
   const [role, setRole] = useState('Viewer')
+  const [pinDraft, setPinDraft] = useState(state.accessPin || '1234')
+  const [pinSaved, setPinSaved] = useState(false)
   const currentRole = state.currentUser.role
   const ownerOnly = currentRole === 'Owner'
 
   function addMember() {
-    const normalized = memberName.trim()
+    const normalized = name.trim()
     if (!normalized) return
     setState((prev) => {
       const existing = prev.familyMembers.some((member) => member.name.toLowerCase() === normalized.toLowerCase())
       if (existing) return prev
       return { ...prev, familyMembers: [...prev.familyMembers, { name: normalized, role }] }
     })
-    setMemberName('')
+    setName('')
   }
 
-  function removeMember(memberNameToRemove) {
+  function removeMember(memberName) {
     setState((prev) => ({
       ...prev,
-      familyMembers: prev.familyMembers.filter((member) => member.name !== memberNameToRemove),
+      familyMembers: prev.familyMembers.filter((member) => member.name !== memberName),
     }))
+  }
+
+  function savePin() {
+    setState((prev) => ({ ...prev, accessPin: pinDraft || '1234' }))
+    setPinSaved(true)
+    setTimeout(() => setPinSaved(false), 1400)
   }
 
   return (
@@ -672,7 +716,7 @@ function FamilyScreen({ state, setState }) {
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100"><Users className="h-5 w-5" /></div>
           <div>
             <h2 className="font-semibold">Approved family members</h2>
-            <p className="text-sm text-slate-500">Prototype access list. Firebase will enforce this later.</p>
+            <p className="text-sm text-slate-500">This simple prototype uses names plus a shared family PIN.</p>
           </div>
         </div>
         <div className="divide-y divide-slate-100">
@@ -693,12 +737,32 @@ function FamilyScreen({ state, setState }) {
       </Card>
 
       <Card className="mt-5">
+        <h2 className="mb-4 text-lg font-semibold">Family PIN</h2>
+        {!ownerOnly ? (
+          <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">Only the Owner can change the family PIN.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-slate-700">Shared PIN</span>
+              <input
+                value={pinDraft}
+                onChange={(e) => setPinDraft(e.target.value)}
+                placeholder="Set family PIN"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400"
+              />
+            </label>
+            <Button onClick={savePin}>{pinSaved ? <Check className="h-4 w-4" /> : <Lock className="h-4 w-4" />} {pinSaved ? 'Saved' : 'Save PIN'}</Button>
+          </div>
+        )}
+      </Card>
+
+      <Card className="mt-5">
         <h2 className="mb-4 text-lg font-semibold">Add family member</h2>
         {!ownerOnly ? (
           <p className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">Only the Owner can add or remove family members.</p>
         ) : (
           <div className="grid gap-3 md:grid-cols-[1fr_160px_auto] md:items-end">
-            <Field label="Name" value={memberName} onChange={setMemberName} placeholder="Family member name" />
+            <Field label="Name" value={name} onChange={setName} placeholder="Family member name" />
             <label className="block">
               <span className="mb-1.5 block text-sm font-medium text-slate-700">Role</span>
               <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-400">
@@ -713,7 +777,8 @@ function FamilyScreen({ state, setState }) {
 
       <div className="mt-5 rounded-3xl bg-slate-100 p-5 text-sm leading-6 text-slate-600">
         <p className="font-semibold text-slate-800">Role guide</p>
-        <p className="mt-1">Owner can manage family access. Admin can create/edit bins and photos. Viewer can only scan and view bin contents.</p>
+        <p className="mt-1">Owner can manage family access and PIN. Admin can create/edit bins and photos. Viewer can only scan and view bin contents.</p>
+        <p className="mt-3 text-xs text-slate-500">Note: this is a lightweight prototype. For real private access across phones, use the Firebase version with Google login and security rules.</p>
       </div>
     </main>
   )
