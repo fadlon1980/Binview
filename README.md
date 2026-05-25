@@ -1,6 +1,6 @@
 # BinView Family Cloud
 
-BinView Family Cloud is a private family app for garage/storage bins.
+BinView Family Cloud is a private family app for garage/storage bins. This package is configured for Elad and Maayan only.
 
 It lets you:
 
@@ -26,17 +26,14 @@ firestore.rules
 storage.rules
 ```
 
-Replace every placeholder email with the real Google email for each family member:
+This package is already configured with these approved Google accounts:
 
 ```text
-REPLACE_ELAD_EMAIL@gmail.com
-REPLACE_MAAYAN_EMAIL@gmail.com
-REPLACE_MICHAL_EMAIL@gmail.com
-REPLACE_MAYA_EMAIL@gmail.com
-REPLACE_DANIEL_EMAIL@gmail.com
+Elad   — fadlon1980@gmail.com — Owner
+Maayan — fadlonmay@gmail.com   — Admin
 ```
 
-Use the same emails in all three files.
+Michal, Maya, and Daniel are not included in this version. You can add them later by adding their Google emails to `firebase-config.js`, `firestore.rules`, and `storage.rules`.
 
 ---
 
@@ -143,7 +140,7 @@ README.md
 Not like this:
 
 ```text
-binview-family-cloud-firebase/
+binview-family-cloud-firebase-elad-maayan/
   index.html
   app.js
 ```

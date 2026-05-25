@@ -394,10 +394,10 @@ function renderSetupRequired() {
       <div class="card" style="max-width: 820px; width: 100%;">
         <span class="badge warn">${icons.lock} Firebase setup required</span>
         <h1 style="margin-top:18px">Connect BinView to Firebase</h1>
-        <p class="lead">Before this cloud version can run, you need to edit <b>firebase-config.js</b> with your Firebase project values and your real family Google emails.</p>
-        <div class="notice warn" style="margin-top:20px">Do not leave the placeholder values like <b>PASTE_YOUR_API_KEY_HERE</b> or <b>REPLACE_ELAD_EMAIL@gmail.com</b>.</div>
+        <p class="lead">Before this cloud version can run, you need to edit <b>firebase-config.js</b> with your Firebase project values. This package already includes Elad and Maayan as the approved emails.</p>
+        <div class="notice warn" style="margin-top:20px">Do not leave placeholder Firebase values like <b>PASTE_YOUR_API_KEY_HERE</b>.</div>
         <pre class="setup-code" style="margin-top:16px">firebase-config.js
-firebase.rules
+firestore.rules
 storage.rules</pre>
       </div>
     </div>

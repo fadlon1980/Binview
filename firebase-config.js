@@ -13,13 +13,9 @@ export const firebaseConfig = {
 
 export const FAMILY_ID = "fadlon-family";
 
-// IMPORTANT:
-// Replace these placeholder emails with the real Google emails each person will use to sign in.
-// The same emails must also be copied into firestore.rules and storage.rules.
+// Approved family members for this first cloud version.
+// Only these Google accounts can use the app and access bins/photos.
 export const FAMILY_MEMBERS = [
-  { name: "Elad", email: "REPLACE_ELAD_EMAIL@gmail.com", role: "Owner" },
-  { name: "Maayan", email: "REPLACE_MAAYAN_EMAIL@gmail.com", role: "Admin" },
-  { name: "Michal", email: "REPLACE_MICHAL_EMAIL@gmail.com", role: "Viewer" },
-  { name: "Maya", email: "REPLACE_MAYA_EMAIL@gmail.com", role: "Viewer" },
-  { name: "Daniel", email: "REPLACE_DANIEL_EMAIL@gmail.com", role: "Viewer" }
+  { name: "Elad", email: "fadlon1980@gmail.com", role: "Owner" },
+  { name: "Maayan", email: "fadlonmay@gmail.com", role: "Admin" }
 ];
