@@ -104,6 +104,95 @@ function makeSafeFileName(name) {
   return name.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-+|-+$/g, "") || `photo-${Date.now()}`;
 }
 
+const IMAGE_COMPRESSION = {
+  maxDimension: 1600,
+  jpegQuality: 0.74,
+  mimeType: "image/jpeg"
+};
+
+function formatFileSize(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read image file."));
+    };
+    img.src = url;
+  });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(new Error("Could not compress image."));
+    }, type, quality);
+  });
+}
+
+async function compressImageFile(file) {
+  if (!file?.type?.startsWith("image/")) {
+    return {
+      blob: file,
+      width: null,
+      height: null,
+      originalSize: file?.size || 0,
+      compressedSize: file?.size || 0,
+      wasCompressed: false
+    };
+  }
+
+  try {
+    const image = await loadImageFromFile(file);
+    const maxSide = Math.max(image.naturalWidth, image.naturalHeight);
+    const scale = Math.min(1, IMAGE_COMPRESSION.maxDimension / maxSide);
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(image, 0, 0, width, height);
+
+    const compressedBlob = await canvasToBlob(canvas, IMAGE_COMPRESSION.mimeType, IMAGE_COMPRESSION.jpegQuality);
+    const shouldUseCompressed = compressedBlob.size < file.size || scale < 1;
+
+    return {
+      blob: shouldUseCompressed ? compressedBlob : file,
+      width,
+      height,
+      originalSize: file.size,
+      compressedSize: shouldUseCompressed ? compressedBlob.size : file.size,
+      wasCompressed: shouldUseCompressed
+    };
+  } catch (error) {
+    console.warn("Photo compression failed. Uploading original file instead.", error);
+    return {
+      blob: file,
+      width: null,
+      height: null,
+      originalSize: file?.size || 0,
+      compressedSize: file?.size || 0,
+      wasCompressed: false
+    };
+  }
+}
+
 function getBinUrl(binId) {
   return `${window.location.origin}${window.location.pathname}#/bin/${binId}`;
 }
@@ -286,35 +375,66 @@ async function deleteBin(bin) {
 
 async function addPhotos(bin, files) {
   if (!canEdit() || !files?.length) return;
-  setBusy(`Uploading ${files.length} photo${files.length > 1 ? "s" : ""}...`);
+  const selectedFiles = Array.from(files);
+  setBusy(`Compressing and uploading ${selectedFiles.length} photo${selectedFiles.length > 1 ? "s" : ""}...`);
   try {
     const uploaded = [];
-    for (const file of Array.from(files)) {
+    let totalOriginalBytes = 0;
+    let totalSavedBytes = 0;
+
+    for (const file of selectedFiles) {
       const photoId = crypto.randomUUID();
-      const safeName = makeSafeFileName(file.name || `${photoId}.jpg`);
+      const compressed = await compressImageFile(file);
+      totalOriginalBytes += compressed.originalSize || 0;
+      totalSavedBytes += compressed.compressedSize || 0;
+
+      const originalBaseName = (file.name || `photo-${photoId}`).replace(/\.[^.]+$/, "");
+      const safeName = makeSafeFileName(`${originalBaseName}.jpg`);
       const path = `families/${FAMILY_ID}/bins/${bin.id}/${photoId}-${safeName}`;
       const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, file, { contentType: file.type || "image/jpeg" });
+
+      await uploadBytes(storageRef, compressed.blob, {
+        contentType: compressed.blob.type || IMAGE_COMPRESSION.mimeType,
+        customMetadata: {
+          originalName: file.name || "Photo",
+          originalSize: String(compressed.originalSize || 0),
+          compressedSize: String(compressed.compressedSize || 0),
+          compressionVersion: "v1"
+        }
+      });
+
       const url = await getDownloadURL(storageRef);
       uploaded.push({
         id: photoId,
         url,
         path,
-        caption: (file.name || "Photo").replace(/\.[^.]+$/, ""),
+        caption: originalBaseName || "Photo",
         uploadedBy: currentMember.name,
         uploadedByEmail: currentUser.email,
+        originalSizeBytes: compressed.originalSize || 0,
+        compressedSizeBytes: compressed.compressedSize || 0,
+        width: compressed.width,
+        height: compressed.height,
+        wasCompressed: compressed.wasCompressed,
         createdAt: new Date().toISOString()
       });
     }
+
     await updateDoc(doc(db, "families", FAMILY_ID, "bins", bin.id), {
       photos: arrayUnion(...uploaded),
       updatedAt: serverTimestamp()
     });
+
+    if (totalOriginalBytes && totalSavedBytes && totalSavedBytes < totalOriginalBytes) {
+      const savings = Math.round((1 - totalSavedBytes / totalOriginalBytes) * 100);
+      setBusy(`Uploaded. Photos compressed by about ${savings}%.`);
+      setTimeout(() => setBusy(""), 1800);
+    }
   } catch (error) {
     console.error(error);
     setError("Could not upload photo. Check Firebase Storage rules and setup.");
   } finally {
-    setBusy("");
+    if (!busyMessage.startsWith("Uploaded.")) setBusy("");
   }
 }
 
@@ -573,7 +693,7 @@ function renderPhotoCard(bin, photo) {
       <div class="photo-card-body">
         ${canEdit() ? `<input class="caption-input" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}" value="${escapeHtml(photo.caption || "")}" placeholder="Photo caption" />` : `<h3>${escapeHtml(photo.caption || "Photo")}</h3>`}
         <div class="photo-card-footer">
-          <span class="tiny">${escapeHtml(photo.uploadedBy || "Family")} · ${escapeHtml(fmtDate(photo.createdAt))}</span>
+          <span class="tiny">${escapeHtml(photo.uploadedBy || "Family")} · ${escapeHtml(fmtDate(photo.createdAt))}${photo.compressedSizeBytes ? ` · ${escapeHtml(formatFileSize(photo.compressedSizeBytes))}` : ""}</span>
           ${canEdit() ? `<button class="btn btn-danger" data-action="delete-photo" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}">${icons.trash}</button>` : ""}
         </div>
       </div>

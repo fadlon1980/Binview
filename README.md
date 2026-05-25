@@ -198,3 +198,24 @@ Do not put private data directly into the code files. The photos and bin content
 
 This version shows an auto-generated QR card directly on each bin page and removes the dependency on the external JavaScript QR library. The printable label still opens from the QR Label button.
 
+
+## Photo compression update
+
+This version compresses photos in the browser before uploading them to Firebase Storage.
+
+Default compression settings:
+
+```text
+Max width/height: 1600 px
+Format: JPEG
+Quality: 0.74
+```
+
+Why this helps:
+
+- Faster upload from phone
+- Faster QR scan page loading
+- Lower Firebase Storage usage
+- Lower bandwidth usage
+
+The original photo file is not uploaded. The compressed version is uploaded and the app stores the compressed file size on the photo record.
