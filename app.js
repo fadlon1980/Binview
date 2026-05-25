@@ -26,10 +26,6 @@ import {
   getDownloadURL,
   deleteObject
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-storage.js";
-import {
-  getFunctions,
-  httpsCallable
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js";
 import { firebaseConfig, FAMILY_ID, FAMILY_MEMBERS } from "./firebase-config.js";
 
 const appRoot = document.getElementById("app");
@@ -40,7 +36,6 @@ let firebaseApp;
 let auth;
 let db;
 let storage;
-let functions;
 let currentUser = null;
 let currentMember = null;
 let bins = [];
@@ -115,12 +110,6 @@ const IMAGE_COMPRESSION = {
   mimeType: "image/jpeg"
 };
 
-const AI_IMAGE_PREP = {
-  maxDimension: 1024,
-  jpegQuality: 0.62,
-  mimeType: "image/jpeg"
-};
-
 function formatFileSize(bytes) {
   if (!bytes && bytes !== 0) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -151,59 +140,6 @@ function canvasToBlob(canvas, type, quality) {
       else reject(new Error("Could not compress image."));
     }, type, quality);
   });
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      resolve(result.includes(",") ? result.split(",")[1] : result);
-    };
-    reader.onerror = () => reject(new Error("Could not read image for AI analysis."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function makeAiImagePayload(sourceBlob) {
-  const image = await loadImageFromFile(sourceBlob);
-  const maxSide = Math.max(image.naturalWidth, image.naturalHeight);
-  const scale = Math.min(1, AI_IMAGE_PREP.maxDimension / maxSide);
-  const width = Math.max(1, Math.round(image.naturalWidth * scale));
-  const height = Math.max(1, Math.round(image.naturalHeight * scale));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(image, 0, 0, width, height);
-
-  const aiBlob = await canvasToBlob(canvas, AI_IMAGE_PREP.mimeType, AI_IMAGE_PREP.jpegQuality);
-  return {
-    imageBase64: await blobToBase64(aiBlob),
-    mimeType: AI_IMAGE_PREP.mimeType,
-    width,
-    height,
-    sizeBytes: aiBlob.size
-  };
-}
-
-async function generateAiDescription({ imageBlob, bin, caption }) {
-  if (!functions) throw new Error("Firebase Functions is not initialized.");
-  const payload = await makeAiImagePayload(imageBlob);
-  const describePhoto = httpsCallable(functions, "describeBinPhoto");
-  const result = await describePhoto({
-    imageBase64: payload.imageBase64,
-    mimeType: payload.mimeType,
-    binName: bin?.name || "",
-    binLocation: bin?.location || "",
-    binCategory: bin?.category || "",
-    binNotes: bin?.notes || "",
-    caption: caption || ""
-  });
-  return String(result?.data?.description || "").trim();
 }
 
 async function compressImageFile(file) {
@@ -266,6 +202,81 @@ function getQrImageUrl(binId, size = 260) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=10&data=${encodeURIComponent(url)}`;
 }
 
+function getSearchTokens() {
+  return searchQuery
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function getPhotoSearchText(photo = {}) {
+  return [
+    photo.caption,
+    photo.description,
+    photo.uploadedBy,
+    photo.uploadedByEmail
+  ].filter(Boolean).join(" ");
+}
+
+function getBinSearchText(bin = {}) {
+  const photoText = (bin.photos || []).map(getPhotoSearchText).join(" ");
+  return [
+    bin.name,
+    bin.location,
+    bin.category,
+    bin.notes,
+    bin.createdByName,
+    bin.createdByEmail,
+    photoText
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function binMatchesSearch(bin) {
+  const tokens = getSearchTokens();
+  if (!tokens.length) return true;
+  const text = getBinSearchText(bin);
+  return tokens.every(token => text.includes(token));
+}
+
+function fieldMatchesSearch(value, tokens) {
+  const text = String(value || "").toLowerCase();
+  return tokens.some(token => text.includes(token));
+}
+
+function getBinMatchDetails(bin) {
+  const tokens = getSearchTokens();
+  if (!tokens.length) return [];
+
+  const details = [];
+  const checks = [
+    ["Name", bin.name],
+    ["Location", bin.location],
+    ["Category", bin.category],
+    ["Notes", bin.notes]
+  ];
+
+  for (const [label, value] of checks) {
+    if (fieldMatchesSearch(value, tokens)) {
+      const safe = String(value || "").trim();
+      if (safe) details.push(`${label}: ${safe.length > 58 ? safe.slice(0, 58) + "…" : safe}`);
+    }
+  }
+
+  const matchingPhotos = (bin.photos || []).filter(photo =>
+    fieldMatchesSearch(photo.caption, tokens) || fieldMatchesSearch(photo.description, tokens)
+  );
+  if (matchingPhotos.length) {
+    const photoMatches = matchingPhotos
+      .slice(0, 2)
+      .map(photo => photo.description || photo.caption || "Photo")
+      .join(", ");
+    details.push(`${matchingPhotos.length} matching photo${matchingPhotos.length > 1 ? "s" : ""}: ${photoMatches}${matchingPhotos.length > 2 ? "…" : ""}`);
+  }
+
+  return details.slice(0, 4);
+}
+
 function setBusy(message) {
   busyMessage = message || "";
   render();
@@ -312,7 +323,6 @@ async function init() {
     auth = getAuth(firebaseApp);
     db = getFirestore(firebaseApp);
     storage = getStorage(firebaseApp);
-    functions = getFunctions(firebaseApp, "us-central1");
 
     window.addEventListener("hashchange", readRoute);
     onAuthStateChanged(auth, user => {
@@ -449,24 +459,11 @@ async function addPhotos(bin, files) {
 
     for (const file of selectedFiles) {
       const photoId = crypto.randomUUID();
-      const originalBaseName = (file.name || `photo-${photoId}`).replace(/\.[^.]+$/, "");
-      setBusy(`Compressing ${originalBaseName || "photo"}...`);
       const compressed = await compressImageFile(file);
       totalOriginalBytes += compressed.originalSize || 0;
       totalSavedBytes += compressed.compressedSize || 0;
 
-      let aiDescription = "";
-      let aiStatus = "not-run";
-      try {
-        setBusy(`AI is describing ${originalBaseName || "photo"}...`);
-        aiDescription = await generateAiDescription({ imageBlob: compressed.blob, bin, caption: originalBaseName });
-        aiStatus = aiDescription ? "generated" : "empty";
-      } catch (aiError) {
-        console.warn("AI description failed. The photo will still be uploaded.", aiError);
-        aiStatus = "failed";
-      }
-
-      setBusy(`Uploading ${originalBaseName || "photo"}...`);
+      const originalBaseName = (file.name || `photo-${photoId}`).replace(/\.[^.]+$/, "");
       const safeName = makeSafeFileName(`${originalBaseName}.jpg`);
       const path = `families/${FAMILY_ID}/bins/${bin.id}/${photoId}-${safeName}`;
       const storageRef = ref(storage, path);
@@ -487,6 +484,7 @@ async function addPhotos(bin, files) {
         url,
         path,
         caption: originalBaseName || "Photo",
+        description: "",
         uploadedBy: currentMember.name,
         uploadedByEmail: currentUser.email,
         originalSizeBytes: compressed.originalSize || 0,
@@ -494,10 +492,6 @@ async function addPhotos(bin, files) {
         width: compressed.width,
         height: compressed.height,
         wasCompressed: compressed.wasCompressed,
-        aiDescription,
-        aiStatus,
-        aiModel: aiDescription ? "gemini" : "",
-        aiGeneratedAt: aiDescription ? new Date().toISOString() : "",
         createdAt: new Date().toISOString()
       });
     }
@@ -520,14 +514,14 @@ async function addPhotos(bin, files) {
   }
 }
 
-async function updatePhotoCaption(bin, photoId, caption) {
+async function updatePhotoDetails(bin, photoId, updates) {
   if (!canEdit()) return;
-  const photos = (bin.photos || []).map(p => p.id === photoId ? { ...p, caption } : p);
+  const photos = (bin.photos || []).map(p => p.id === photoId ? { ...p, ...updates } : p);
   try {
     await updateDoc(doc(db, "families", FAMILY_ID, "bins", bin.id), { photos, updatedAt: serverTimestamp() });
   } catch (error) {
     console.error(error);
-    setError("Could not update photo caption.");
+    setError("Could not update photo details.");
   }
 }
 
@@ -678,12 +672,8 @@ function renderHeader() {
 }
 
 function renderBinsPage() {
-  const filtered = bins.filter(bin => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return true;
-    const photoText = (bin.photos || []).map(p => [p.caption, p.aiDescription].join(" ")).join(" ");
-    return [bin.name, bin.location, bin.category, bin.notes, photoText].join(" ").toLowerCase().includes(q);
-  });
+  const isSearching = searchQuery.trim().length > 0;
+  const filtered = bins.filter(binMatchesSearch);
 
   return `
     <main class="page">
@@ -694,8 +684,9 @@ function renderBinsPage() {
         </div>
         ${canEdit() ? `<button class="btn btn-primary" data-action="open-create">+ Create new bin</button>` : ""}
       </div>
-      <div class="search"><span>${icons.search}</span><input id="searchInput" value="${escapeHtml(searchQuery)}" placeholder="Search by bin, shelf, category, or notes..." /></div>
-      ${filtered.length === 0 ? `<div class="empty"><h3>No bins found</h3><p class="small" style="margin-top:6px">Create your first bin or adjust the search.</p></div>` : ""}
+      <div class="search"><span>${icons.search}</span><input id="searchInput" value="${escapeHtml(searchQuery)}" placeholder="Search bins, shelves, categories, notes, photo captions, or photo descriptions..." />${isSearching ? `<button class="btn btn-secondary" data-action="clear-search">Clear</button>` : ""}</div>
+      ${isSearching ? `<div class="search-summary"><b>${filtered.length}</b> of <b>${bins.length}</b> bins match “${escapeHtml(searchQuery.trim())}”. Search checks bin details, photo captions, and photo descriptions.</div>` : ""}
+      ${filtered.length === 0 ? `<div class="empty"><h3>No bins found</h3><p class="small" style="margin-top:6px">Try another word, like “tools”, “winter”, “shelf”, a photo caption, or a photo description.</p></div>` : ""}
       <div class="bin-grid">
         ${filtered.map(renderBinCard).join("")}
       </div>
@@ -704,6 +695,7 @@ function renderBinsPage() {
 }
 
 function renderBinCard(bin) {
+  const matchDetails = getBinMatchDetails(bin);
   return `
     <button class="bin-card" data-action="open-bin" data-bin-id="${escapeHtml(bin.id)}">
       <div class="bin-card-top">
@@ -716,6 +708,7 @@ function renderBinCard(bin) {
         <div>🏷️ ${escapeHtml(bin.category || "No category")}</div>
       </div>
       ${bin.notes ? `<p class="notes-preview">${escapeHtml(bin.notes)}</p>` : ""}
+      ${matchDetails.length ? `<div class="match-hints">${matchDetails.map(detail => `<div>${escapeHtml(detail)}</div>`).join("")}</div>` : ""}
     </button>
   `;
 }
@@ -770,12 +763,20 @@ function renderBinPage() {
 }
 
 function renderPhotoCard(bin, photo) {
+  const safeAlt = photo.description || photo.caption || "Bin photo";
   return `
     <div class="photo-card">
-      <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.caption || "Bin photo")}" loading="lazy" />
+      <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(safeAlt)}" loading="lazy" />
       <div class="photo-card-body">
-        ${canEdit() ? `<input class="caption-input" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}" value="${escapeHtml(photo.caption || "")}" placeholder="Photo caption" />` : `<h3>${escapeHtml(photo.caption || "Photo")}</h3>`}
-        ${photo.aiDescription ? `<div class="ai-description"><b>AI saw:</b> ${escapeHtml(photo.aiDescription)}</div>` : photo.aiStatus === "failed" ? `<div class="ai-description muted"><b>AI:</b> description was not generated. Photo saved normally.</div>` : ""}
+        ${canEdit() ? `
+          <label class="photo-field-label">Caption</label>
+          <input class="caption-input" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}" value="${escapeHtml(photo.caption || "")}" placeholder="Short caption, e.g. Winter jackets" />
+          <label class="photo-field-label">Description</label>
+          <textarea class="description-input" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}" placeholder="Describe what is visible in this photo, e.g. black snow boots, kids gloves, blue jacket">${escapeHtml(photo.description || "")}</textarea>
+        ` : `
+          <h3>${escapeHtml(photo.caption || "Photo")}</h3>
+          ${photo.description ? `<p class="photo-description">${escapeHtml(photo.description)}</p>` : ""}
+        `}
         <div class="photo-card-footer">
           <span class="tiny">${escapeHtml(photo.uploadedBy || "Family")} · ${escapeHtml(fmtDate(photo.createdAt))}${photo.compressedSizeBytes ? ` · ${escapeHtml(formatFileSize(photo.compressedSizeBytes))}` : ""}</span>
           ${canEdit() ? `<button class="btn btn-danger" data-action="delete-photo" data-bin-id="${escapeHtml(bin.id)}" data-photo-id="${escapeHtml(photo.id)}">${icons.trash}</button>` : ""}
@@ -870,10 +871,13 @@ function bindCommonEvents() {
   document.querySelectorAll('[data-action="copy-url"]').forEach(el => el.addEventListener("click", () => copyText(el.dataset.url)));
   document.querySelectorAll('[data-action="print"]').forEach(el => el.addEventListener("click", () => window.print()));
 
+  document.querySelectorAll('[data-action="clear-search"]').forEach(el => el.addEventListener("click", () => { searchQuery = ""; render(); }));
+
   const searchInput = document.getElementById("searchInput");
   if (searchInput) {
     searchInput.addEventListener("input", e => { searchQuery = e.target.value; render(); });
     searchInput.focus({ preventScroll: true });
+    try { searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length); } catch {}
   }
 
   const createForm = document.getElementById("createBinForm");
@@ -911,7 +915,14 @@ function bindCommonEvents() {
   document.querySelectorAll(".caption-input").forEach(input => {
     input.addEventListener("change", () => {
       const bin = bins.find(b => b.id === input.dataset.binId);
-      if (bin) updatePhotoCaption(bin, input.dataset.photoId, input.value);
+      if (bin) updatePhotoDetails(bin, input.dataset.photoId, { caption: input.value.trim() });
+    });
+  });
+
+  document.querySelectorAll(".description-input").forEach(textarea => {
+    textarea.addEventListener("change", () => {
+      const bin = bins.find(b => b.id === textarea.dataset.binId);
+      if (bin) updatePhotoDetails(bin, textarea.dataset.photoId, { description: textarea.value.trim() });
     });
   });
 }
