@@ -108,6 +108,11 @@ function getBinUrl(binId) {
   return `${window.location.origin}${window.location.pathname}#/bin/${binId}`;
 }
 
+function getQrImageUrl(binId, size = 260) {
+  const url = getBinUrl(binId);
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=10&data=${encodeURIComponent(url)}`;
+}
+
 function setBusy(message) {
   busyMessage = message || "";
   render();
@@ -372,7 +377,6 @@ function render() {
     </div>
   `;
   bindCommonEvents();
-  if (qrModalBin) drawQrCode(qrModalBin);
 }
 
 function renderLoading() {
@@ -535,6 +539,14 @@ function renderBinPage() {
       <div class="detail-grid">
         <section class="card">
           <span class="badge ok">${icons.lock} Private family access</span>
+          <div class="inline-qr">
+            <div>
+              <div class="label-small">Auto QR label</div>
+              <p class="small">This QR is created automatically from this bin link.</p>
+              <button class="btn btn-secondary" style="margin-top:10px" data-action="open-qr" data-bin-id="${escapeHtml(bin.id)}">${icons.qr} Open printable label</button>
+            </div>
+            <img src="${escapeHtml(getQrImageUrl(bin.id, 160))}" alt="QR code for ${escapeHtml(bin.name || "Storage bin")}" />
+          </div>
           <div class="detail-list">
             <div><div class="label-small">Location</div><p>${escapeHtml(bin.location || "No location added")}</p></div>
             <div><div class="label-small">Category</div><p>${escapeHtml(bin.category || "No category added")}</p></div>
@@ -624,7 +636,7 @@ function renderQrModal(bin) {
       <div class="qr-box">
         <h2>${escapeHtml(bin.name || "Storage bin")}</h2>
         <p class="small" style="margin-top:6px">${escapeHtml(bin.location || "Family storage")}</p>
-        <div class="qr-canvas-wrap"><canvas id="qrCanvas" width="220" height="220"></canvas></div>
+        <div class="qr-canvas-wrap"><img class="qr-img" src="${escapeHtml(getQrImageUrl(bin.id, 260))}" alt="QR code for ${escapeHtml(bin.name || "Storage bin")}" /></div>
         <div class="copy-url">${escapeHtml(url)}</div>
       </div>
       <div class="actions" style="justify-content:flex-end; margin-top:14px"><button class="btn btn-secondary" data-action="copy-url" data-url="${escapeHtml(url)}">Copy link</button><button class="btn btn-primary" data-action="print">Print label</button></div>
@@ -637,13 +649,8 @@ function fieldHtml(name, label, placeholder, textarea = false, value = "") {
   return `<label class="field"><span>${escapeHtml(label)}</span>${textarea ? `<textarea name="${name}" placeholder="${escapeHtml(placeholder)}">${safeValue}</textarea>` : `<input name="${name}" value="${safeValue}" placeholder="${escapeHtml(placeholder)}" />`}</label>`;
 }
 
-function drawQrCode(bin) {
-  const canvas = document.getElementById("qrCanvas");
-  if (!canvas || !window.QRCode) return;
-  window.QRCode.toCanvas(canvas, getBinUrl(bin.id), { width: 220, margin: 2 }, error => {
-    if (error) console.error(error);
-  });
-}
+// QR codes are rendered as images using a QR image endpoint, so they appear automatically
+// even when the external QR JavaScript library is unavailable.
 
 function bindCommonEvents() {
   document.querySelectorAll('[data-action="clear-error"]').forEach(el => el.addEventListener("click", () => setError("")));

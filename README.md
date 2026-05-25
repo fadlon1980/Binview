@@ -192,3 +192,9 @@ Only the family emails listed in those rules can read or write bins/photos.
 The GitHub Pages website files are public, but your bin data and photos are protected by Firebase rules.
 
 Do not put private data directly into the code files. The photos and bin contents should be stored only in Firebase.
+
+
+## QR auto-generation fix
+
+This version shows an auto-generated QR card directly on each bin page and removes the dependency on the external JavaScript QR library. The printable label still opens from the QR Label button.
+
