@@ -141,3 +141,52 @@ h3 { font-size: 18px; }
   .modal-head, .modal .actions { display: none !important; }
   .qr-box { border: 0; }
 }
+
+.print-only { display: none !important; }
+.qr-pack-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 16px; flex-wrap: wrap; }
+.qr-pack-picker { display: grid; gap: 8px; max-height: 250px; overflow: auto; border: 1px solid var(--line); border-radius: 20px; padding: 10px; background: #f8fafc; }
+.qr-pack-row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 16px; background: #fff; border: 1px solid var(--line); cursor: pointer; }
+.qr-pack-row input { width: 18px; height: 18px; }
+.qr-pack-row span { display: grid; gap: 2px; }
+.qr-pack-row small { color: var(--muted); }
+.qr-pack-preview { margin-top: 18px; display: grid; gap: 16px; }
+.qr-pack-sheet { border: 1px solid var(--line); border-radius: 24px; padding: 14px; background: #fff; }
+.qr-pack-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.qr-pack-label { min-height: 260px; border: 1px dashed #cbd5e1; border-radius: 22px; padding: 14px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; background: #fff; overflow: hidden; }
+.qr-pack-label img { width: 150px; height: 150px; object-fit: contain; }
+.qr-pack-label h3 { font-size: 18px; line-height: 1.15; }
+.qr-pack-label p { font-size: 13px; color: #475569; margin-top: 4px; }
+.qr-pack-label small { display: block; max-width: 100%; font-size: 9px; color: #94a3b8; word-break: break-all; line-height: 1.25; }
+.qr-pack-label-empty { visibility: hidden; }
+
+@media print {
+  @page { size: A4 portrait; margin: 10mm; }
+  body { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  .modal, .modal * { visibility: visible !important; }
+  .no-print, .no-print * { display: none !important; visibility: hidden !important; }
+  .print-only, .print-only * { display: block !important; visibility: visible !important; }
+  .modal-backdrop { position: static !important; background: transparent !important; padding: 0 !important; display: block !important; }
+  .modal { box-shadow: none !important; max-height: none !important; width: 100% !important; max-width: none !important; border-radius: 0 !important; padding: 0 !important; overflow: visible !important; }
+  .modal-head, .modal .actions { display: none !important; }
+  .qr-box { border: 0 !important; }
+
+  .qr-pack-modal .modal-head,
+  .qr-pack-modal .actions,
+  .qr-pack-modal .qr-pack-controls,
+  .qr-pack-modal .qr-pack-picker { display: none !important; }
+  .print-pack-title { text-align: center; margin-bottom: 6mm; }
+  .print-pack-title h2 { font-size: 16pt; margin: 0; }
+  .print-pack-title p { font-size: 9pt; color: #475569; margin-top: 2mm; }
+  .qr-pack-preview { display: block !important; margin: 0 !important; }
+  .qr-pack-sheet { width: 190mm; height: 270mm; border: 0 !important; border-radius: 0 !important; padding: 0 !important; page-break-after: always; break-after: page; background: #fff !important; }
+  .qr-pack-sheet:last-child { page-break-after: auto; break-after: auto; }
+  .qr-pack-grid { height: 254mm; display: grid !important; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8mm; }
+  .qr-pack-label { border: 1px solid #111827 !important; border-radius: 6mm !important; padding: 7mm !important; min-height: auto !important; height: 100%; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: space-between !important; text-align: center !important; overflow: hidden !important; background: #fff !important; }
+  .qr-pack-label h3 { font-size: 16pt !important; line-height: 1.15 !important; margin: 0 !important; }
+  .qr-pack-label p { font-size: 10pt !important; color: #334155 !important; margin: 2mm 0 0 !important; }
+  .qr-pack-label img { width: 45mm !important; height: 45mm !important; object-fit: contain !important; }
+  .qr-pack-label small { font-size: 6.5pt !important; color: #64748b !important; word-break: break-all !important; line-height: 1.2 !important; }
+  .qr-pack-label-empty { visibility: hidden !important; border: 0 !important; }
+  .page-counter { text-align: center; color: #64748b; font-size: 8pt; margin-top: 3mm; }
+}

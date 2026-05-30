@@ -239,3 +239,17 @@ When a search is active, matching bin cards show a short match hint so you can s
 ## Photo descriptions
 
 This version adds a manual description field under every photo. Existing photos do not need migration; they will show an empty description box the next time you open the bin. Type a description and click/tap outside the box to save it. Search checks photo captions and descriptions.
+
+## QR pack printing
+
+This version adds a **Print QR pack** button on the main bins page.
+
+You can:
+
+- Select specific bins to include
+- Select all bins
+- Clear the selection
+- Print selected QR labels
+- Print 4 QR labels per A4 page in a 2 × 2 layout
+
+The printed QR codes still point to the same cloud bin records, so you do not need to reprint labels when you edit bin details, notes, captions, descriptions, or photos.

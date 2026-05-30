@@ -46,6 +46,8 @@ let searchQuery = "";
 let busyMessage = "";
 let errorMessage = "";
 let qrModalBin = null;
+let qrPackModalOpen = false;
+let selectedQrBinIds = new Set();
 let editModalBin = null;
 let createModalOpen = false;
 
@@ -570,6 +572,7 @@ function render() {
       ${createModalOpen ? renderCreateModal() : ""}
       ${editModalBin ? renderEditModal(editModalBin) : ""}
       ${qrModalBin ? renderQrModal(qrModalBin) : ""}
+      ${qrPackModalOpen ? renderQrPackModal() : ""}
     </div>
   `;
   bindCommonEvents();
@@ -682,7 +685,10 @@ function renderBinsPage() {
           <h2>Storage bins</h2>
           <p class="small" style="margin-top:6px">Shared cloud list for approved family members.</p>
         </div>
-        ${canEdit() ? `<button class="btn btn-primary" data-action="open-create">+ Create new bin</button>` : ""}
+        <div class="actions">
+          ${bins.length ? `<button class="btn btn-secondary" data-action="open-qr-pack">${icons.qr} Print QR pack</button>` : ""}
+          ${canEdit() ? `<button class="btn btn-primary" data-action="open-create">+ Create new bin</button>` : ""}
+        </div>
       </div>
       <div class="search"><span>${icons.search}</span><input id="searchInput" value="${escapeHtml(searchQuery)}" placeholder="Search bins, shelves, categories, notes, photo captions, or photo descriptions..." />${isSearching ? `<button class="btn btn-secondary" data-action="clear-search">Clear</button>` : ""}</div>
       ${isSearching ? `<div class="search-summary"><b>${filtered.length}</b> of <b>${bins.length}</b> bins match “${escapeHtml(searchQuery.trim())}”. Search checks bin details, photo captions, and photo descriptions.</div>` : ""}
@@ -849,6 +855,90 @@ function renderQrModal(bin) {
   `;
 }
 
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+function getSelectedQrBins() {
+  return bins.filter(bin => selectedQrBinIds.has(bin.id));
+}
+
+function renderQrPackModal() {
+  const selectedBins = getSelectedQrBins();
+  const pages = chunkArray(selectedBins, 4);
+  return `
+    <div class="modal-backdrop"><div class="modal qr-pack-modal">
+      <div class="modal-head no-print">
+        <div>
+          <h2>Print QR pack</h2>
+          <p class="small" style="margin-top:6px">Select bins and print 4 QR labels evenly on each A4 page.</p>
+        </div>
+        <button class="btn btn-ghost" data-action="close-modals">✕</button>
+      </div>
+
+      <div class="qr-pack-controls no-print">
+        <div class="actions">
+          <button class="btn btn-secondary" data-action="select-all-qr-pack">Select all</button>
+          <button class="btn btn-secondary" data-action="clear-qr-pack">Clear</button>
+        </div>
+        <div class="actions">
+          <span class="badge">${selectedBins.length} selected</span>
+          <button class="btn btn-primary" data-action="print" ${selectedBins.length ? "" : "disabled"}>Print selected</button>
+        </div>
+      </div>
+
+      <div class="qr-pack-picker no-print">
+        ${bins.map(bin => `
+          <label class="qr-pack-row">
+            <input type="checkbox" class="qr-pack-checkbox" data-bin-id="${escapeHtml(bin.id)}" ${selectedQrBinIds.has(bin.id) ? "checked" : ""} />
+            <span>
+              <b>${escapeHtml(bin.name || "Untitled bin")}</b>
+              <small>${escapeHtml(bin.location || "No location")} · ${escapeHtml(bin.category || "No category")}</small>
+            </span>
+          </label>
+        `).join("")}
+      </div>
+
+      ${selectedBins.length ? `
+        <div class="print-only print-pack-title">
+          <h2>BinView QR labels</h2>
+          <p>${selectedBins.length} selected label${selectedBins.length > 1 ? "s" : ""}</p>
+        </div>
+        <div class="qr-pack-preview">
+          ${pages.map((pageBins, pageIndex) => `
+            <section class="qr-pack-sheet">
+              <div class="qr-pack-grid">
+                ${pageBins.map(bin => renderQrPackLabel(bin)).join("")}
+                ${Array.from({ length: 4 - pageBins.length }).map(() => `<div class="qr-pack-label qr-pack-label-empty"></div>`).join("")}
+              </div>
+              <div class="print-only page-counter">Page ${pageIndex + 1} of ${pages.length}</div>
+            </section>
+          `).join("")}
+        </div>
+      ` : `<div class="empty" style="margin-top:16px"><h3>No QR labels selected</h3><p class="small" style="margin-top:6px">Select one or more bins above, then print.</p></div>`}
+    </div></div>
+  `;
+}
+
+function renderQrPackLabel(bin) {
+  const url = getBinUrl(bin.id);
+  return `
+    <article class="qr-pack-label">
+      <div class="qr-pack-label-head">
+        <h3>${escapeHtml(bin.name || "Storage bin")}</h3>
+        <p>${escapeHtml(bin.location || "Family storage")}</p>
+      </div>
+      <img src="${escapeHtml(getQrImageUrl(bin.id, 230))}" alt="QR code for ${escapeHtml(bin.name || "Storage bin")}" />
+      <div class="qr-pack-label-foot">
+        <p>${escapeHtml(bin.category || "BinView")}</p>
+        <small>${escapeHtml(url)}</small>
+      </div>
+    </article>
+  `;
+}
+
 function fieldHtml(name, label, placeholder, textarea = false, value = "") {
   const safeValue = escapeHtml(value || "");
   return `<label class="field"><span>${escapeHtml(label)}</span>${textarea ? `<textarea name="${name}" placeholder="${escapeHtml(placeholder)}">${safeValue}</textarea>` : `<input name="${name}" value="${safeValue}" placeholder="${escapeHtml(placeholder)}" />`}</label>`;
@@ -863,13 +953,24 @@ function bindCommonEvents() {
   document.querySelectorAll('[data-action="go-bins"]').forEach(el => el.addEventListener("click", () => { activeView = "bins"; selectedBinId = null; updateHashForView(); render(); }));
   document.querySelectorAll('[data-action="go-family"]').forEach(el => el.addEventListener("click", () => { activeView = "family"; selectedBinId = null; updateHashForView(); render(); }));
   document.querySelectorAll('[data-action="open-create"]').forEach(el => el.addEventListener("click", () => { createModalOpen = true; render(); }));
-  document.querySelectorAll('[data-action="close-modals"]').forEach(el => el.addEventListener("click", () => { createModalOpen = false; editModalBin = null; qrModalBin = null; render(); }));
+  document.querySelectorAll('[data-action="open-qr-pack"]').forEach(el => el.addEventListener("click", () => { selectedQrBinIds = new Set(bins.map(bin => bin.id)); qrPackModalOpen = true; render(); }));
+  document.querySelectorAll('[data-action="select-all-qr-pack"]').forEach(el => el.addEventListener("click", () => { selectedQrBinIds = new Set(bins.map(bin => bin.id)); render(); }));
+  document.querySelectorAll('[data-action="clear-qr-pack"]').forEach(el => el.addEventListener("click", () => { selectedQrBinIds = new Set(); render(); }));
+  document.querySelectorAll('[data-action="close-modals"]').forEach(el => el.addEventListener("click", () => { createModalOpen = false; editModalBin = null; qrModalBin = null; qrPackModalOpen = false; render(); }));
   document.querySelectorAll('[data-action="open-bin"]').forEach(el => el.addEventListener("click", () => { selectedBinId = el.dataset.binId; activeView = "bin"; updateHashForView(); render(); }));
   document.querySelectorAll('[data-action="open-qr"]').forEach(el => el.addEventListener("click", () => { qrModalBin = bins.find(b => b.id === el.dataset.binId); render(); }));
   document.querySelectorAll('[data-action="open-edit"]').forEach(el => el.addEventListener("click", () => { editModalBin = bins.find(b => b.id === el.dataset.binId); render(); }));
   document.querySelectorAll('[data-action="delete-bin"]').forEach(el => el.addEventListener("click", () => { const bin = bins.find(b => b.id === el.dataset.binId); if (bin) deleteBin(bin); }));
   document.querySelectorAll('[data-action="copy-url"]').forEach(el => el.addEventListener("click", () => copyText(el.dataset.url)));
   document.querySelectorAll('[data-action="print"]').forEach(el => el.addEventListener("click", () => window.print()));
+
+  document.querySelectorAll(".qr-pack-checkbox").forEach(input => {
+    input.addEventListener("change", () => {
+      if (input.checked) selectedQrBinIds.add(input.dataset.binId);
+      else selectedQrBinIds.delete(input.dataset.binId);
+      render();
+    });
+  });
 
   document.querySelectorAll('[data-action="clear-search"]').forEach(el => el.addEventListener("click", () => { searchQuery = ""; render(); }));
 
